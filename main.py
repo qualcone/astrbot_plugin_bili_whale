@@ -173,6 +173,26 @@ class BiliWhale(Star):
             return None
         return LMClient(c.lm_url, c.lm_key, c.lm_persona_id, c.lm_scope)
 
+    async def _persona_name(self) -> str:
+        """机器人在主人私聊里当前用的人格名（LivingMemory 按它过滤召回；取不到返回空）。"""
+        umo = self._umo()
+        if not umo:
+            return ""
+        try:
+            cm = self.context.conversation_manager
+            cid = await cm.get_curr_conversation_id(umo)
+            conv = await cm.get_conversation(umo, cid) if cid else None
+            pid = getattr(conv, "persona_id", None)
+            if pid == "[%None]":
+                return ""
+            if pid:
+                return str(pid)
+            d = await _maybe_await(self.context.persona_manager.get_default_persona_v3(umo))
+            name = d.get("name") if isinstance(d, dict) else getattr(d, "name", "")
+            return str(name or "")
+        except Exception:
+            return ""
+
     async def _lm_connect(self) -> list[str]:
         """一键连接 LivingMemory：检测 -> 读 personas/scopes -> 自动选择 -> 启用写入并保存配置。"""
         c = self.cfg
@@ -187,7 +207,10 @@ class BiliWhale(Star):
         ok, msg, data = await cli.discover()
         if not ok:
             return lines + [f"❌ 读取 personas/scopes 失败：{msg}"]
-        t = choose_target(data or {}, [self._umo(), c.owner_qq])
+        if not self._umo():
+            lines.append("  ⚠ 还没记录主人会话：请先用主人 QQ 私聊机器人一次（或配置 owner_umo），否则无法确定 scope")
+        fb = {"scope": self._umo(), "persona_id": await self._persona_name()}
+        t = choose_target(data or {}, [self._umo(), c.owner_qq], fb)
         lines += ["  " + n for n in t["notes"]]
         changes = {"livingmemory_enabled": True}
         if not c.lm_persona_id and t["persona_id"]:
@@ -203,6 +226,9 @@ class BiliWhale(Star):
         c.lm_enabled = True
         c.lm_persona_id = changes.get("livingmemory_persona_id", c.lm_persona_id)
         c.lm_scope = changes.get("livingmemory_scope", c.lm_scope)
+        lines.append(f"  当前配置：persona={c.lm_persona_id or '(空)'}  scope={c.lm_scope or '(空)'}")
+        if not c.lm_scope:
+            lines.append("  ⚠ scope 仍为空：此时写入的记忆在全局范围，私聊召回不到，请手动填 livingmemory_scope（主人私聊会话）")
         lines.append("✅ 已启用写入 LivingMemory。下次醒来（或 /bili wake）后，用 /lmem search 看是否多了记忆")
         return lines
 
@@ -284,6 +310,8 @@ class BiliWhale(Star):
         u = self.state.usage(date)
         lm = self._memory()
         lm_line = "未启用" if lm is None else (self.state.data.get("lm_last") or "尚无写入记录")
+        if lm is not None and not self.cfg.lm_scope:
+            lm_line += "（⚠ scope 为空：记忆会写入全局范围，私聊召回不到，请发 /bili lm connect）"
         risk = self.state.risk_today(date)
         lines = [
             f"下次醒来：{pend[0].strftime('%m-%d %H:%M') if pend else '暂无计划'}",

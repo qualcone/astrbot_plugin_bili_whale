@@ -58,6 +58,7 @@ SESSDATA 只保存在 AstrBot 插件配置里，日志/日记/记忆/提示词/�
 3. 本插件配置里只填 `livingmemory_api_key=<令牌>`，（地址不是默认的 `http://127.0.0.1:7801` 时再改 `livingmemory_url`）。
 4. **一键连接**：发送 `/bili lm connect`（或保持 `livingmemory_auto_connect=true`，插件启动时会自动做一次）。它会：检测接口是否可用 → 读取可用的 persona 和 scope → 自动选择并写回配置 → 启用 `livingmemory_enabled`。
    - 密钥带白名单时，persona/scope 留空，由服务端取白名单第一项。
+   - LivingMemory 里还没有任何记忆时候选是空的：此时自动用**主人私聊会话**作为 scope、**机器人当前人格**作为 persona_id（LivingMemory 私聊召回只认这两项；不带它们写入会落在全局范围，私聊召回不到）。
    - 只有一个候选就直接选；scope 会用你的 QQ 号/私聊会话去匹配主人的私聊 scope。
    - 有多个候选而无法判断时不会乱选，会列出候选，请手动填 `livingmemory_persona_id`（机器人的人格）和 `livingmemory_scope`（主人私聊会话），这样私聊时才能召回。
    - 已手动填写的 persona/scope 不会被覆盖。想自己管理配置就关掉 `livingmemory_auto_connect`。

@@ -2,7 +2,7 @@ name: astrbot_plugin_bili_whale
 display_name: B站鲸鱼
 short_desc: 机器人每晚自己刷 B 站、写日记、私信分享
 desc: 让机器人每晚自己刷 B 站、看懂视频（字幕+抽帧+视觉模型）、写日记，把值得的一条私信给主人，并把要点写入 LivingMemory。只读，不做任何 B 站写操作。
-version: v0.2.0
+version: v0.2.1
 author: astrbot_plugin_bili_whale contributors
 repo: https://github.com/qualcone/astrbot_plugin_bili_whale
 astrbot_version: ">=4.16"

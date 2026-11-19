@@ -2,6 +2,11 @@
 
 格式参考 Keep a Changelog；每次更新插件都要在这里记一笔，并同步 `metadata.yaml` 的 `version`。
 
+## [0.2.1] - 2026-11-19
+
+### 修复
+- **LivingMemory 一键连接**：LivingMemory 库里还没有记忆时 `/personas` 返回空列表，导致 persona/scope 选不出来、记忆写到全局范围而私聊召回不到（召回只认「私聊会话 + 当前人格」）。现在没有候选时自动用主人私聊会话（UMO）作为 scope、机器人当前人格作为 persona_id；永远不会把全局范围 `livingmemory:global` 当成"唯一候选"选中；`/bili status` 在 scope 为空时给出警告。
+
 ## [0.2.0] - 2026-11-19
 
 ### 新增

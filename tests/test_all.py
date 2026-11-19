@@ -384,3 +384,28 @@ def test_browser_like_cookies_and_headers():
     assert h["Origin"] == "https://www.bilibili.com" and "zh-CN" in h["Accept-Language"]
     assert "Cookie" not in c._headers_for("https://aisubtitle.hdslb.com/x.json")
     assert "SECRET" not in str(c.safe_headers())
+
+
+# ---- LivingMemory：库里还没有记忆时用私聊会话/当前人格 ----
+def test_choose_target_fallback_when_no_candidates():
+    from astrbot_plugin_bili_whale.livingmemory import choose_target
+    fb = {"scope": "qq:FriendMessage:123", "persona_id": "mybot"}
+    t = choose_target({"personas": [], "scopes": []}, ["qq:FriendMessage:123"], fb)
+    assert t["scope"] == "qq:FriendMessage:123" and t["persona_id"] == "mybot"
+
+
+def test_choose_target_never_picks_global_scope():
+    from astrbot_plugin_bili_whale.livingmemory import choose_target
+    fb = {"scope": "qq:FriendMessage:123", "persona_id": ""}
+    t = choose_target({"personas": [], "scopes": ["livingmemory:global"]}, [], fb)
+    assert t["scope"] == "qq:FriendMessage:123"          # 不会被"唯一候选"误选成全局
+    t2 = choose_target({"personas": [], "scopes": ["livingmemory:global"]}, [], {})
+    assert t2["scope"] == "" and any("手动" in n for n in t2["notes"])
+
+
+def test_choose_target_fallback_persona_in_candidates():
+    from astrbot_plugin_bili_whale.livingmemory import choose_target
+    t = choose_target({"personas": ["a", "mybot"], "scopes": []}, [], {"persona_id": "mybot"})
+    assert t["persona_id"] == "mybot"
+    t2 = choose_target({"personas": ["a", "b"], "scopes": []}, [], {"persona_id": "zzz"})
+    assert t2["persona_id"] == ""                        # 当前人格不在候选里且候选不为空：不乱选

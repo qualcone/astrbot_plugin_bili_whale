@@ -82,30 +82,43 @@ class LMClient:
         return False, msg
 
 
-def choose_target(data: dict, hints: list[str] | None = None) -> dict:
+GLOBAL_SCOPE = "livingmemory:global"
+
+
+def choose_target(data: dict, hints: list[str] | None = None, fallback: dict | None = None) -> dict:
     """根据 /personas 返回的数据自动选 persona_id / scope（纯函数，便于测试）。
 
+    背景（LivingMemory 源码）：私聊召回只认 scope==私聊会话(UMO) 且 persona_id==当前人格；
+    不带 scope/persona 写入会落到全局范围(livingmemory:global)且无人格，私聊召回不到。
+
     规则：
-    - 密钥有白名单(allowed_*)：留空，让服务端取白名单第一项（也最不容易越权）。
-    - 无白名单：只有一个候选就选它；多个候选时，若有 hint 精确命中 scope 就选它，否则留空并提示手动选择。
+    - 密钥有白名单(allowed_*)：留空，由服务端取白名单第一项。
+    - 无白名单：hint 精确命中（或以 ':hint' 结尾）优先；其次 fallback（机器人当前的私聊会话/人格）
+      在候选里或候选为空时采用；否则只有一个候选就选它（scope 不会选全局范围）；有歧义则提示手动选择。
     返回 {"persona_id", "scope", "notes": [...]}。
     """
     hints = [h for h in (hints or []) if h]
+    fallback = fallback or {}
     notes: list[str] = []
     out = {"persona_id": "", "scope": "", "notes": notes}
     for key, field, allowed_key in (("persona_id", "personas", "allowed_personas"),
                                     ("scope", "scopes", "allowed_scopes")):
         cands = [c for c in (data.get(field) or []) if c]
+        if key == "scope":
+            cands = [c for c in cands if c != GLOBAL_SCOPE]
         allowed = [c for c in (data.get(allowed_key) or []) if c]
         if allowed:
             notes.append(f"{field}: 密钥有白名单 {allowed}，留空由服务端取第一项")
             continue
         pick = ""
-        for h in hints:  # hint 精确命中，或 scope 以 ':hint' 结尾（如 平台:FriendMessage:QQ号）
+        for h in hints:
             hit = [c for c in cands if c == h or c.endswith(":" + h)]
             if len(hit) == 1:
                 pick = hit[0]
                 break
+        fb = fallback.get(key, "")
+        if not pick and fb and (not cands or fb in cands):
+            pick = fb
         if not pick and len(cands) == 1:
             pick = cands[0]
         if pick:
@@ -114,5 +127,5 @@ def choose_target(data: dict, hints: list[str] | None = None) -> dict:
         elif len(cands) > 1:
             notes.append(f"{field}: 有多个候选 {cands[:10]}，请手动填 livingmemory_{key}")
         else:
-            notes.append(f"{field}: 暂无候选（LivingMemory 里还没有对应记忆），留空")
+            notes.append(f"{field}: 暂无候选且取不到当前值，请手动填 livingmemory_{key}")
     return out
