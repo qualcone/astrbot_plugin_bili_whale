@@ -372,3 +372,15 @@ def test_run_test_writes_nothing(tmp_path):
     files = list((tmp_path / "runs").glob("test_*.json"))
     assert len(files) == 1 and json.loads(files[0].read_text(encoding="utf-8"))["test"] is True
     assert p.running is False
+
+
+# ---- 412 缓解：浏览器式 cookie ----
+def test_browser_like_cookies_and_headers():
+    from astrbot_plugin_bili_whale.bili_client import API, BiliClient
+    c = BiliClient(sessdata="SECRET", buvid3="B3")
+    c.extra_cookies = {"b_nut": "123"}
+    h = c._headers_for(API + "/x/web-interface/wbi/search/type")
+    assert "buvid3=B3" in h["Cookie"] and "b_nut=123" in h["Cookie"] and "SECRET" in h["Cookie"]
+    assert h["Origin"] == "https://www.bilibili.com" and "zh-CN" in h["Accept-Language"]
+    assert "Cookie" not in c._headers_for("https://aisubtitle.hdslb.com/x.json")
+    assert "SECRET" not in str(c.safe_headers())

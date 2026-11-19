@@ -85,6 +85,8 @@ class BiliClient:
         self.bili_jct = bili_jct
         self.buvid3 = buvid3
         self.buvid4 = ""
+        self.extra_cookies: dict[str, str] = {}
+        self._ready = False
         self.interval = interval
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self._session = session
@@ -113,7 +115,10 @@ class BiliClient:
             ck.append(f"buvid3={self.buvid3}")
         if self.buvid4:
             ck.append(f"buvid4={self.buvid4}")
-        h = {"User-Agent": UA, "Referer": REFERER, "Accept": "application/json"}
+        for k, v in self.extra_cookies.items():
+            ck.append(f"{k}={v}")
+        h = {"User-Agent": UA, "Referer": REFERER, "Origin": "https://www.bilibili.com",
+             "Accept": "application/json, text/plain, */*", "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.5"}
         if ck:
             h["Cookie"] = "; ".join(ck)
         return h
@@ -146,7 +151,7 @@ class BiliClient:
             async with self._sess().get(url, params=params, headers=self._headers_for(url),
                                         timeout=self.timeout) as r:
                 if r.status in (412, 429):
-                    raise BiliRisk(f"HTTP {r.status}：被风控或限流，当晚应停止")
+                    raise BiliRisk(f"HTTP {r.status}：被风控或限流（{base}），当晚应停止")
                 if r.status >= 400:
                     raise BiliError(f"HTTP {r.status}（{base}）")
                 txt = await r.text()
@@ -160,6 +165,8 @@ class BiliClient:
             raise BiliError("B 站返回了非 JSON 内容（可能被拦截）")
 
     async def _api(self, path: str, params: dict | None = None, use_wbi=False):
+        if not self._ready and path != "/x/frontend/finger/spi":
+            await self.ensure_buvid()  # 首次请求前先预热 cookie
         params = dict(params or {})
         if use_wbi:
             img, sub = await self._wbi_keys()
@@ -184,7 +191,30 @@ class BiliClient:
         self._wbi_at = time.time()
         return self._wbi
 
+    async def warm_up(self):
+        """像浏览器一样先访问一次首页，拿到 buvid3 / b_nut 等 cookie（缺这些时搜索类接口很容易 412）。"""
+        try:
+            await self._throttle()
+            hdr = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                   "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.5"}
+            async with self._sess().get("https://www.bilibili.com/", headers=hdr,
+                                        timeout=self.timeout) as r:
+                for k, m in r.cookies.items():
+                    if k == "buvid3" and not self.buvid3:
+                        self.buvid3 = m.value
+                    elif k == "buvid4" and not self.buvid4:
+                        self.buvid4 = m.value
+                    elif k in ("b_nut", "_uuid", "b_lsid", "buvid_fp"):
+                        self.extra_cookies[k] = m.value
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            log.warning("首页预热失败（继续）: %s", type(e).__name__)
+
     async def ensure_buvid(self):
+        if self._ready:
+            return
+        self._ready = True
+        if not self.buvid3:
+            await self.warm_up()
         if self.buvid3:
             return
         try:
@@ -213,7 +243,7 @@ class BiliClient:
     async def search(self, keyword: str, count: int = 5) -> list[dict]:
         await self.ensure_buvid()
         d = await self._api("/x/web-interface/wbi/search/type",
-                            {"search_type": "video", "keyword": keyword, "page": 1}, use_wbi=True)
+                            {"search_type": "video", "keyword": keyword, "page": 1, "web_location": 1430654}, use_wbi=True)
         out = []
         for it in (d.get("result") or [])[:count]:
             out.append({
