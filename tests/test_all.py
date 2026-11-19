@@ -409,3 +409,37 @@ def test_choose_target_fallback_persona_in_candidates():
     assert t["persona_id"] == "mybot"
     t2 = choose_target({"personas": ["a", "b"], "scopes": []}, [], {"persona_id": "zzz"})
     assert t2["persona_id"] == ""                        # 当前人格不在候选里且候选不为空：不乱选
+
+
+# ---- 记忆单条长度 ----
+def test_memory_content_capped_at_500(tmp_path):
+    import asyncio
+    from astrbot_plugin_bili_whale.pipeline import MEMORY_MAX_CHARS, Pipeline
+
+    class FakeLM:
+        got = []
+
+        async def write(self, content, imp, bvid):
+            FakeLM.got.append((content, imp, bvid))
+            return True, "已写入"
+
+    async def llm(p, s):
+        return ""
+
+    async def persona():
+        return ""
+
+    async def send(t):
+        return True
+
+    st = State(tmp_path / "s.json")
+    p = Pipeline(parse_settings({}), st, None, llm, persona, lambda: None, lambda: FakeLM(), send,
+                 tmp_path / "d", tmp_path / "r", UTC, None)
+    note = {"bvid": "BV1", "title": "标题", "memory_note": "字" * 900, "summary": "", "share_score": 9}
+    rec = {}
+    asyncio.run(p.write_memory([note], rec))
+    content, imp, bvid = FakeLM.got[0]
+    assert MEMORY_MAX_CHARS == 500 and len(content) <= 500 and content.startswith("看过《标题》（BV1")
+    assert imp == 0.5 and bvid == "BV1" and st.mem_written("BV1")
+    asyncio.run(p.write_memory([note], rec))             # 再写一次：本地去重，不重复调用
+    assert len(FakeLM.got) == 1

@@ -63,7 +63,7 @@ SESSDATA 只保存在 AstrBot 插件配置里，日志/日记/记忆/提示词/�
    - 有多个候选而无法判断时不会乱选，会列出候选，请手动填 `livingmemory_persona_id`（机器人的人格）和 `livingmemory_scope`（主人私聊会话），这样私聊时才能召回。
    - 已手动填写的 persona/scope 不会被覆盖。想自己管理配置就关掉 `livingmemory_auto_connect`。
 5. `/bili lm status` 查看当前连接；之后 `/bili wake` 跑一次，再用 `/lmem search 看过` 验证是否多了记忆。
-6. 每个深看的视频写一条（≤200 字），`idempotency_key=bili-whale-<BV号>`，`importance` 0.4~0.5，`source=bili_whale`。失败只记日志，并在 `/bili status` 里显示。
+6. 每个深看的视频写一条（≤500 字，第一人称、用人设口吻，前半要点后半感想），`idempotency_key=bili-whale-<BV号>`，`importance` 0.4~0.5，`source=bili_whale`。失败只记日志，并在 `/bili status` 里显示。
 
 ## 命令（仅管理员）
 
