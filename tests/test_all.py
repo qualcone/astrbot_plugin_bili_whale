@@ -313,3 +313,62 @@ def test_choose_target_allowlist_left_empty():
 def test_auto_connect_setting():
     assert parse_settings({}).lm_auto_connect is True
     assert parse_settings({"livingmemory_auto_connect": False}).lm_auto_connect is False
+
+
+# ---- 测试唤醒 /bili test ----
+def test_parse_bvid():
+    from astrbot_plugin_bili_whale.bili_client import parse_bvid
+    assert parse_bvid("BV1mC4y1Z7EW") == "BV1mC4y1Z7EW"
+    assert parse_bvid("https://www.bilibili.com/video/BV1mC4y1Z7EW/?spm_id_from=333") == "BV1mC4y1Z7EW"
+    assert parse_bvid("av123") == "" and parse_bvid("") == ""
+
+
+def test_run_test_writes_nothing(tmp_path):
+    import asyncio
+    import json
+    from astrbot_plugin_bili_whale.pipeline import Pipeline
+
+    class FakeBili:
+        async def video_info(self, b):
+            return {"bvid": b, "aid": 1, "cid": 2, "title": "T", "desc": "d", "author": "u",
+                    "duration": 60, "tname": "x", "stat": {}, "tags": ["a"]}
+
+        async def subtitles(self, *a, **k):
+            return "[0:01] hi"
+
+        async def comments(self, *a, **k):
+            return [{"user": "u", "text": "c", "like": 1}]
+
+    class FakeLM:
+        writes = []
+
+        async def write(self, *a):
+            FakeLM.writes.append(a)
+            return True, "ok"
+
+    sent = []
+
+    async def llm(prompt, system):
+        return '{"summary":"s","feeling":"f","memory_note":"m","share_score":9}'
+
+    async def persona():
+        return ""
+
+    async def send(text):
+        sent.append(text)
+        return True
+
+    cfg = parse_settings({})
+    st = State(tmp_path / "s.json")
+    p = Pipeline(cfg, st, FakeBili(), llm, persona, lambda: None, lambda: FakeLM(), send,
+                 tmp_path / "diary", tmp_path / "runs", UTC, None)
+    rec = asyncio.run(p.run_test("BV1mC4y1Z7EW"))
+    assert rec["note"]["title"] == "T" and rec["note"]["has_subtitle"]
+    assert rec["note"]["vision"] is False and "ffmpeg" in rec["note"]["vision_note"]  # 无 ffmpeg 降级
+    assert FakeLM.writes == [] and sent == []                 # 不写记忆、不私信
+    assert not (tmp_path / "diary").exists()                  # 不写日记
+    assert not st.is_seen("BV1mC4y1Z7EW")                     # 不标记已看
+    assert st.shares_on("2026-01-01") == [] and not st.data["mem_done"]
+    files = list((tmp_path / "runs").glob("test_*.json"))
+    assert len(files) == 1 and json.loads(files[0].read_text(encoding="utf-8"))["test"] is True
+    assert p.running is False

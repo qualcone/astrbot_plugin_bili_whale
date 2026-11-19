@@ -72,6 +72,7 @@ SESSDATA 只保存在 AstrBot 插件配置里，日志/日记/记忆/提示词/�
 | `/bili wake` | 立刻手动跑一遍完整流程；`/bili wake force` 先清除今晚的风控停止标记 |
 | `/bili plan` | 今晚计划（✔ 已醒，· 待醒） |
 | `/bili diary` | 发送最近一篇日记 |
+| `/bili test [BV号或链接]` | 测试唤醒：强制深看指定视频（默认内置测试视频 BV1mC4y1Z7EW），**不写日记、不写记忆、不私信、不标记已看**，结果直接回复，详情在 `runs/test_*.json` |
 | `/bili lm connect` | 一键连接 LivingMemory（`/bili lm status` 查看） |
 | `/bili check` | 自检：cookie、WBI、搜索、字幕、直链、抽帧、视觉模型、LivingMemory，各一行 |
 

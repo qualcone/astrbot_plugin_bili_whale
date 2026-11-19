@@ -17,7 +17,7 @@ from astrbot.api.star import Context, Star, StarTools
 
 from . import diary as diary_mod
 from . import frames as fr
-from .bili_client import (BiliClient, BiliError, BiliRisk, fmt_comments, fmt_info,
+from .bili_client import (BiliClient, BiliError, BiliRisk, fmt_comments, fmt_info, parse_bvid,
                           fmt_video_line, redact)
 from .config import parse_settings
 from .livingmemory import LMClient, choose_target
@@ -27,6 +27,7 @@ from .scheduler import (due_wake, ensure_plan, get_tz, is_peak, mark_done, next_
 from .state import State
 
 PLUGIN_NAME = "astrbot_plugin_bili_whale"
+DEFAULT_TEST_BVID = "BV1mC4y1Z7EW"  # /bili test 的默认测试视频
 
 
 async def _maybe_await(x):
@@ -364,6 +365,39 @@ class BiliWhale(Star):
                 f"scope={self.cfg.lm_scope or '(空)'}\n{'✅' if ok else '❌'} {msg}\n{'✅' if ok2 else '❌'} {m2}")
             return
         yield event.plain_result("\n".join(await self._lm_connect()))
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @bili.command("test")
+    async def cmd_test(self, event: AstrMessageEvent, target: str = ""):
+        """测试唤醒：强制深看指定视频（BV 号或链接，默认内置测试视频），不写日记/记忆/私信、不标记已看"""
+        if not event.is_admin():
+            return
+        bvid = parse_bvid(target) if target else DEFAULT_TEST_BVID
+        if not bvid:
+            yield event.plain_result("没认出 BV 号，用法：/bili test BV1xxxxxxxxx 或直接贴视频链接")
+            return
+        yield event.plain_result(f"测试唤醒：强制深看 {bvid}（不写日记/记忆，不私信，忽略高价时段），请稍候……")
+        self.pipeline.ignore_peak = True
+        try:
+            rec = await self.pipeline.run_test(bvid)
+        finally:
+            self.pipeline.ignore_peak = False
+        if rec.get("aborted"):
+            yield event.plain_result(f"没有运行：{rec['aborted']}")
+            return
+        n = rec.get("note")
+        if not n:
+            msg = "失败：" + ("；".join(rec["errors"]) or rec.get("risk") or "未知原因")
+            yield event.plain_result(msg)
+            return
+        look = "已看画面" if n["vision"] else f"没看到画面（{n['vision_note']}）"
+        msg = (f"《{n['title']}》 UP:{n['author']}\n"
+               f"字幕：{'有' if n['has_subtitle'] else '无'}；{look}\n"
+               f"总结：{n['summary']}\n感想：{n['feeling']}\n分享分：{n['share_score']}\n"
+               f"（测试：未写日记/记忆，未私信；详情见 runs/test_*.json）")
+        if rec["errors"]:
+            msg += "\n⚠ " + "；".join(rec["errors"])[:300]
+        yield event.plain_result(msg)
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @bili.command("wake")

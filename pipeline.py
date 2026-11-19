@@ -155,10 +155,10 @@ class Pipeline:
         return [v for v in scored if v["score"] >= 5][:self.cfg.deep_watch]
 
     # ---------- 深看 ----------
-    async def deep(self, v: dict, rec) -> dict:
+    async def deep(self, v: dict, rec, mark: bool = True) -> dict:
         cfg, date = self.cfg, self.now().date().isoformat()
         info = v.get("info") or await self.bili.video_info(v["bvid"])
-        note = {"bvid": v["bvid"], "title": info["title"] or v["title"], "author": info["author"],
+        note = {"bvid": v["bvid"], "title": info["title"] or v.get("title", ""), "author": info["author"],
                 "vision": False, "vision_note": "", "has_subtitle": False}
         try:
             sub = await self.bili.subtitles(v["bvid"], info["cid"], cfg.subtitle_max_chars)
@@ -194,7 +194,8 @@ class Pipeline:
             note["share_score"] = float(j.get("share_score", 0))
         except (TypeError, ValueError):
             note["share_score"] = 0.0
-        self.state.mark_seen(v["bvid"], date, "deep")
+        if mark:
+            self.state.mark_seen(v["bvid"], date, "deep")
         return note
 
     async def _look(self, info: dict, note: dict, rec, sub: str = "") -> str:
@@ -407,6 +408,35 @@ class Pipeline:
             self.state.data["last_run"] = {"at": rec["started"], "file": f.name,
                                            "videos": len(notes), "risk": rec.get("risk", "")}
             self.state.save()
+        return rec
+
+    # ---------- 测试唤醒：只深看指定视频，不写日记、不写记忆、不私信、不标记已看 ----------
+    async def run_test(self, bvid: str) -> dict:
+        now = self.now()
+        rec = {"started": now.isoformat(), "test": True, "bvid": bvid, "errors": [], "videos": []}
+        if self.running:
+            rec["aborted"] = "已有一次流程在运行"
+            return rec
+        reason = self.state.risk_today(now.date().isoformat())
+        if reason:
+            rec["aborted"] = f"今晚已因风控停止：{reason}（/bili wake force 可清除）"
+            return rec
+        self.running = True
+        try:
+            try:
+                note = await self.deep({"bvid": bvid}, rec, mark=False)
+                rec["note"] = note
+            except BiliRisk as e:
+                rec["risk"] = str(e)
+                self.state.set_risk(now.date().isoformat(), str(e))
+            except Exception as e:  # noqa
+                rec["errors"].append(f"{type(e).__name__}: {e}")
+                log.exception("测试唤醒异常")
+        finally:
+            self.running = False
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            f = self.run_dir / f"test_{now.strftime('%Y-%m-%d_%H%M%S')}.json"
+            f.write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
         return rec
 
     # ---------- 自检 ----------

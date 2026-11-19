@@ -307,6 +307,15 @@ def fmt_video_line(i: int, v: dict) -> str:
             f"时长:{fmt_duration(v['duration'])} 简介:{desc}")
 
 
+BVID_RE = re.compile(r"BV[0-9A-Za-z]{10}")
+
+
+def parse_bvid(s: str) -> str:
+    """从 BV 号或 B 站链接里取 BV 号；取不到返回空串。"""
+    m = BVID_RE.search(s or "")
+    return m.group(0) if m else ""
+
+
 def fmt_info(v: dict) -> str:
     s = v.get("stat", {})
     return (f"《{v['title']}》{v['bvid']}\nUP:{v['author']} 分区:{v['tname']} 时长:{fmt_duration(v['duration'])}\n"
