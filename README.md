@@ -53,7 +53,7 @@ SESSDATA 只保存在 AstrBot 插件配置里，日志/日记/记忆/提示词/�
 
 ## LivingMemory 对接（支持一键连接）
 
-1. 在 LivingMemory 配置里打开 `external_api.enabled`（默认监听 `127.0.0.1:7801`），重载。
+1. 先确认 LivingMemory 版本 **≥ 2.11.0**（这个外部 API 是 2026-11-12 的 2.11.0 才加的，旧版没有这一项，请先在 WebUI 更新插件）。然后在 AstrBot WebUI → 插件 → LivingMemory → 配置里，找到名为 **「外部记忆 API」** 的分组，打开其中的「启用外部记忆 API」（即 `external_api.enabled`，默认关闭；监听 `127.0.0.1:7801`），然后**重载 LivingMemory 插件**，日志里应出现外部记忆 API 正在监听的提示。
 2. 管理员发送 `/lmem apikey create bili_whale write`（参数以 LivingMemory 的 `/lmem apikey` 帮助为准；需要**写权限**，可再限定 persona / scope 白名单）。令牌以 `lm_` 开头，只显示一次。
 3. 本插件配置里只填 `livingmemory_api_key=<令牌>`，（地址不是默认的 `http://127.0.0.1:7801` 时再改 `livingmemory_url`）。
 4. **一键连接**：发送 `/bili lm connect`（或保持 `livingmemory_auto_connect=true`，插件启动时会自动做一次）。它会：检测接口是否可用 → 读取可用的 persona 和 scope → 自动选择并写回配置 → 启用 `livingmemory_enabled`。
