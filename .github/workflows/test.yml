@@ -1,0 +1,14 @@
+name: test
+on: [push, pull_request]
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: astrbot_plugin_bili_whale
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest aiohttp tzdata
+      - run: python -m pytest astrbot_plugin_bili_whale
