@@ -108,6 +108,10 @@ SESSDATA 只保存在 AstrBot 插件配置里，日志/日记/记忆/提示词/�
 
 见 `_conf_schema.json`；时间窗支持跨午夜（如 `23:00-01:00`），`quiet_hours` 默认 `23:00-09:00`（该时段看完的分享推迟到之后）。
 
+## 更新日志
+
+见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 测试
 
 ```powershell
