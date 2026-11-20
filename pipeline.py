@@ -58,8 +58,8 @@ def fence(label: str, body: str) -> str:
 
 class Pipeline:
     def __init__(self, cfg, state, bili: BiliClient, llm, persona, vision_factory, memory_factory,
-                 send_dm, diary_dir: Path, run_dir: Path, tz, ffmpeg=None):
-        """llm(prompt, system)->str；persona()->str；vision_factory()->VisionClient|None；
+                 send_dm, diary_dir: Path, run_dir: Path, tz, ffmpeg=None, peak_fn=None):
+        """llm(prompt, system)->str；persona()->str；vision_factory()->ProviderVision|None；
         memory_factory()->LMClient|None；send_dm(text)->bool"""
         self.cfg, self.state, self.bili = cfg, state, bili
         self.llm, self.persona = llm, persona
@@ -68,6 +68,7 @@ class Pipeline:
         self.diary_dir, self.run_dir = Path(diary_dir), Path(run_dir)
         self.tz = tz
         self.ffmpeg = ffmpeg
+        self.peak_fn = peak_fn  # () -> bool：当前是否需要避开的高价时段
         self.running = False
         self.ignore_peak = False  # 手动 /bili wake force 时为 True
 
@@ -76,8 +77,7 @@ class Pipeline:
         return b > 0 and self.state.tokens_used(self.now().date().isoformat()) >= b
 
     def peak_blocked(self) -> bool:
-        return (self.cfg.offpeak_only and not self.ignore_peak
-                and is_peak(self.now(), set(self.cfg.peak_holidays)))
+        return (not self.ignore_peak) and bool(self.peak_fn and self.peak_fn())
 
     def now(self):
         return datetime.now(self.tz)

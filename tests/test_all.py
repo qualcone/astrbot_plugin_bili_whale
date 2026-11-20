@@ -175,7 +175,6 @@ def test_parse_settings_defaults_and_clamp():
     assert s.interests == ["猫", "音乐", "科普"]
     assert s.quiet_hours == "23:00-09:00"
     assert any("非法" in w for w in s.warnings)
-    assert s.vision_model == "deepseek-flash"
 
 
 # ---- 杂项 ----
@@ -250,8 +249,10 @@ def test_pick_times_avoid_peak():
 
 def test_offpeak_settings():
     s = parse_settings({"peak_holidays": "2026-10-01, bad, 2026-10-02"})
-    assert s.offpeak_only is True and s.peak_holidays == ["2026-10-01", "2026-10-02"]
-    assert parse_settings({"offpeak_only": False}).offpeak_only is False
+    assert s.offpeak_mode == "auto" and s.peak_holidays == ["2026-10-01", "2026-10-02"]
+    assert parse_settings({"offpeak_mode": "off"}).offpeak_mode == "off"
+    assert parse_settings({"offpeak_only": False}).offpeak_mode == "off"      # 兼容旧配置
+    assert parse_settings({"offpeak_mode": "x"}).offpeak_mode == "auto"
 
 
 # ---- token 预算 / 边界条件 ----
@@ -443,3 +444,31 @@ def test_memory_content_capped_at_500(tmp_path):
     assert imp == 0.5 and bvid == "BV1" and st.mem_written("BV1")
     asyncio.run(p.write_memory([note], rec))             # 再写一次：本地去重，不重复调用
     assert len(FakeLM.got) == 1
+
+
+# ---- 仅对 DeepSeek 启用低价时段 ----
+def test_looks_like_deepseek():
+    from types import SimpleNamespace as NS
+    from astrbot_plugin_bili_whale.scheduler import looks_like_deepseek
+    assert looks_like_deepseek(NS(provider_config={"id": "ds", "api_base": "https://api.deepseek.com/v1"}))
+    assert looks_like_deepseek(NS(provider_config={"model": "DeepSeek-V3"}))
+    assert looks_like_deepseek(NS(provider_config={}, get_model=lambda: "deepseek-flash"))
+    assert not looks_like_deepseek(NS(provider_config={"id": "gpt", "api_base": "https://api.openai.com/v1"},
+                                      get_model=lambda: "gpt-5"))
+    assert not looks_like_deepseek(object())
+
+
+def test_pipeline_peak_follows_peak_fn(tmp_path):
+    from astrbot_plugin_bili_whale.pipeline import Pipeline
+    st = State(tmp_path / "s.json")
+    flag = {"v": True}
+    p = Pipeline(parse_settings({}), st, None, None, None, None, None, None,
+                 tmp_path / "d", tmp_path / "r", UTC, None, lambda: flag["v"])
+    assert p.peak_blocked() is True
+    p.ignore_peak = True
+    assert p.peak_blocked() is False
+    p.ignore_peak = False
+    flag["v"] = False
+    assert p.peak_blocked() is False
+    assert Pipeline(parse_settings({}), st, None, None, None, None, None, None,
+                    tmp_path / "d", tmp_path / "r", UTC, None).peak_blocked() is False

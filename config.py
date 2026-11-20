@@ -77,11 +77,8 @@ class Settings:
     max_images_per_night: int = 8
     subtitle_max_chars: int = 4000
     diary_context_count: int = 3
-    vision_model: str = "deepseek-flash"
     vision_provider_id: str = ""
     vision_mode: str = "always"
-    vision_api_base: str = ""
-    vision_api_key: str = ""
     chat_provider_id: str = ""
     max_share_per_day: int = 1
     lm_enabled: bool = False
@@ -93,7 +90,7 @@ class Settings:
     interval: tuple = (2.0, 4.0)
     quiet_hours: str = "23:00-09:00"
     max_tokens_per_night: int = 100000
-    offpeak_only: bool = True
+    offpeak_mode: str = "auto"  # auto：仅在使用 DeepSeek 时按低价时段调度；off：不限制
     peak_holidays: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -126,15 +123,12 @@ def parse_settings(c) -> Settings:
     s.max_images_per_night = _int(c.get("max_images_per_night", 8), 8, 0, 100)
     s.subtitle_max_chars = _int(c.get("subtitle_max_chars", 4000), 4000, 200, 20000)
     s.diary_context_count = _int(c.get("diary_context_count", 3), 3, 0, 10)
-    s.vision_model = str(c.get("vision_model") or "deepseek-flash").strip()
     s.vision_provider_id = str(c.get("vision_provider_id", "") or "").strip()
     vm = str(c.get("vision_mode") or "always").strip().lower()
     if vm not in ("always", "auto", "never"):
         s.warnings.append(f"vision_mode 非法，已用 always: {vm}")
         vm = "always"
     s.vision_mode = vm
-    s.vision_api_base = str(c.get("vision_api_base", "") or "").strip().rstrip("/")
-    s.vision_api_key = str(c.get("vision_api_key", "") or "").strip()
     s.chat_provider_id = str(c.get("chat_provider_id", "") or "").strip()
     s.max_share_per_day = _int(c.get("max_share_per_day", 1), 1, 0, 10)
     s.lm_enabled = bool(c.get("livingmemory_enabled", False))
@@ -150,7 +144,13 @@ def parse_settings(c) -> Settings:
         q = "23:00-09:00"
     s.quiet_hours = q
     s.max_tokens_per_night = _int(c.get("max_tokens_per_night", 100000), 100000, 0, 5000000)
-    s.offpeak_only = bool(c.get("offpeak_only", True))
+    om = str(c.get("offpeak_mode") or "auto").strip().lower()
+    if c.get("offpeak_only") is False:  # 兼容旧版配置项
+        om = "off"
+    if om not in ("auto", "off"):
+        s.warnings.append(f"offpeak_mode 非法，已用 auto: {om}")
+        om = "auto"
+    s.offpeak_mode = om
     hol = []
     for d in to_list(c.get("peak_holidays")):
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):

@@ -135,3 +135,14 @@ def in_quiet(now: datetime, quiet: str) -> bool:
     if a == b:
         return False
     return (a <= cur < b) if a < b else (cur >= a or cur < b)
+
+
+def looks_like_deepseek(provider) -> bool:
+    """AstrBot 提供商是否为 DeepSeek（看提供商 ID、api_base、模型名）；用于只对 DeepSeek 启用低价时段调度。"""
+    conf = getattr(provider, "provider_config", None) or {}
+    parts = [str(conf.get(k, "")) for k in ("id", "api_base", "model")]
+    try:
+        parts.append(str(provider.get_model()))
+    except Exception:
+        pass
+    return "deepseek" in " ".join(parts).lower()

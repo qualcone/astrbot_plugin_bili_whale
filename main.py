@@ -22,8 +22,8 @@ from .bili_client import (BiliClient, BiliError, BiliRisk, fmt_comments, fmt_inf
 from .config import parse_settings
 from .livingmemory import LMClient, choose_target
 from .pipeline import Pipeline
-from .scheduler import (due_wake, ensure_plan, get_tz, is_peak, mark_done, next_offpeak,
-                        pending_wakes)
+from .scheduler import (due_wake, ensure_plan, get_tz, is_peak, looks_like_deepseek, mark_done,
+                        next_offpeak, pending_wakes)
 from .state import State
 
 PLUGIN_NAME = "astrbot_plugin_bili_whale"
@@ -50,7 +50,7 @@ class BiliWhale(Star):
         self.bili = self._make_bili()
         self.pipeline = Pipeline(
             self.cfg, self.state, self.bili, self._llm, self._persona, self._vision,
-            self._memory, self._send_dm, self.diary_dir, self.run_dir, self.tz, self.ffmpeg)
+            self._memory, self._send_dm, self.diary_dir, self.run_dir, self.tz, self.ffmpeg, self._peak)
         for w in self.cfg.warnings:
             logger.warning(f"[bili_whale] {w}")
         if not self.ffmpeg:
@@ -69,9 +69,20 @@ class BiliWhale(Star):
         c = self.cfg
         return BiliClient(c.sessdata, c.bili_jct, c.buvid3, c.interval)
 
+    def _uses_deepseek(self) -> bool:
+        """当前使用的文本/识图提供商是否有 DeepSeek（低价时段调度只对 DeepSeek 有意义）。"""
+        try:
+            c = self.cfg
+            provs = [self.context.get_provider_by_id(i) for i in (c.chat_provider_id, c.vision_provider_id) if i]
+            if not provs:
+                provs = [self.context.get_using_provider(umo=self._umo() or None)]
+            return any(p is not None and looks_like_deepseek(p) for p in provs)
+        except Exception:
+            return False
+
     def _peak(self, dt=None) -> bool:
-        """配置了 offpeak_only 时，dt（默认现在）是否处于 DeepSeek 高价时段（北京时间）。"""
-        if not self.cfg.offpeak_only:
+        """是否处于需要避开的 DeepSeek 高价时段（北京时间）；非 DeepSeek 或 offpeak_mode=off 时恒为 False。"""
+        if self.cfg.offpeak_mode != "auto" or not self._uses_deepseek():
             return False
         return is_peak(dt or datetime.now(self.tz), set(self.cfg.peak_holidays))
 
@@ -140,32 +151,19 @@ class BiliWhale(Star):
         return ""
 
     def _vision(self):
+        """识图提供商：优先 vision_provider_id；留空时使用聊天提供商（需支持图片输入，如 DeepSeek 的 deepseek-flash）。"""
         c = self.cfg
-        if c.vision_provider_id:  # 复用 AstrBot 识图提供商
-            try:
-                p = self.context.get_provider_by_id(c.vision_provider_id)
-                if p is not None:
-                    return fr.ProviderVision(p)
-            except Exception:
-                pass
-            logger.warning(f"[bili_whale] 找不到识图提供商 {c.vision_provider_id}，改用直连接口")
-        key, base = c.vision_api_key, c.vision_api_base
-        if not key or not base:
-            try:  # 沿用 AstrBot 里 DeepSeek 提供商的配置（取得到才用）
-                for p in self.context.get_all_providers():
-                    conf = getattr(p, "provider_config", {}) or {}
-                    blob = f"{conf.get('id', '')} {conf.get('api_base', '')}".lower()
-                    if "deepseek" in blob:
-                        k = conf.get("key")
-                        k = k[0] if isinstance(k, list) and k else k
-                        key = key or (k or "")
-                        base = base or conf.get("api_base", "")
-                        break
-            except Exception:
-                pass
-        if not key:
+        pid = c.vision_provider_id or c.chat_provider_id
+        try:
+            p = self.context.get_provider_by_id(pid) if pid else self.context.get_using_provider(
+                umo=self._umo() or None)
+        except Exception as e:
+            logger.warning(f"[bili_whale] 获取识图提供商失败: {type(e).__name__}")
             return None
-        return fr.VisionClient(base or "https://api.deepseek.com", key, c.vision_model)
+        if p is None:
+            logger.warning(f"[bili_whale] 找不到识图提供商 {pid or '(默认)'}，本次不看画面")
+            return None
+        return fr.ProviderVision(p, label=pid or "默认聊天提供商")
 
     def _memory(self):
         c = self.cfg
@@ -328,7 +326,8 @@ class BiliWhale(Star):
                 ("🔴 现在是高价时段（北京时间），最早 "
                  + next_offpeak(now, set(self.cfg.peak_holidays)).strftime("%m-%d %H:%M")
                  + " 起低价") if self._peak(now) else "🟢 现在是低价时段")
-            + ("（仅低价时段运行）" if self.cfg.offpeak_only else "（未限制低价时段）"),
+            + ("（仅低价时段运行）" if self._uses_deepseek() and self.cfg.offpeak_mode == "auto"
+               else "（当前模型无需低价时段调度）"),
         ]
         if self.state.data.get("pending_share"):
             lines.append("有一条分享因安静时段推迟中")
