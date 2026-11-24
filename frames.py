@@ -7,9 +7,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import shutil
 import tempfile
 from pathlib import Path
+
+import aiohttp
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/124.0.0.0 Safari/537.36")
@@ -152,3 +155,64 @@ class ProviderVision:
         if not text:
             raise FrameError("识图提供商返回空内容")
         return text, {}
+
+
+class DirectVision:
+    """直连 OpenAI 兼容视觉接口（如 DeepSeek deepseek-flash），不依赖 AstrBot 提供商的识图适配。"""
+
+    def __init__(self, api_key: str, api_base: str = "https://api.deepseek.com/v1",
+                 model: str = "deepseek-flash", timeout: float = 150):
+        self.api_key = api_key.strip()
+        self.api_base = (api_base or "https://api.deepseek.com/v1").strip().rstrip("/")
+        self.model = (model or "deepseek-flash").strip()
+        self.timeout = timeout
+
+    def build_payload(self, boards: list[tuple[Path, list[float]]], title: str) -> dict:
+        lines = [_intro(title, len(boards))]
+        for i, (_, ts) in enumerate(boards, 1):
+            lines.append(board_prompt(title, ts, i, len(boards)))
+        content: list[dict] = [{"type": "text", "text": "\n".join(lines)}]
+        for p, _ in boards:
+            b64 = base64.b64encode(Path(p).read_bytes()).decode("ascii")
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+        return {
+            "model": self.model,
+            "messages": [{"role": "user", "content": content}],
+            "max_tokens": 1024,
+        }
+
+    async def describe(self, boards: list[tuple[Path, list[float]]], title: str) -> tuple[str, dict]:
+        if not self.api_key:
+            raise FrameError("未配置识图模型 API Key")
+        url = self.api_base + "/chat/completions"
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        payload = self.build_payload(boards, title)
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as s:
+                async with s.post(url, json=payload, headers=headers) as r:
+                    try:
+                        data = await r.json(content_type=None)
+                    except Exception:
+                        data = {}
+                    if not isinstance(data, dict):
+                        data = {}
+                    if r.status != 200:
+                        err = data.get("error") if isinstance(data.get("error"), dict) else {}
+                        msg = err.get("message") or data.get("message") or f"HTTP {r.status}"
+                        raise FrameError(f"识图接口 HTTP {r.status}: {str(msg)[:100]}")
+        except FrameError:
+            raise
+        except asyncio.TimeoutError:
+            raise FrameError("识图接口超时")
+        except aiohttp.ClientError as e:
+            raise FrameError(f"连接识图接口失败：{type(e).__name__}")
+        choices = data.get("choices") or []
+        msg = (choices[0].get("message") or {}) if choices and isinstance(choices[0], dict) else {}
+        text = str(msg.get("content") or "").strip()
+        if not text:
+            raise FrameError("识图接口返回空内容")
+        usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        return text, {
+            "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
+            "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
+        }

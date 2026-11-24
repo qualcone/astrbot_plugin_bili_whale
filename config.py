@@ -125,6 +125,9 @@ class Settings:
     max_images_per_night: int = 8
     subtitle_max_chars: int = 4000
     diary_context_count: int = 3
+    vision_api_key: str = ""
+    vision_api_base: str = "https://api.deepseek.com/v1"
+    vision_model: str = "deepseek-flash"
     vision_provider_id: str = ""
     vision_mode: str = "always"
     chat_provider_id: str = ""
@@ -203,6 +206,9 @@ def parse_settings(c) -> Settings:
     s.max_images_per_night = _int(c.get("max_images_per_night", 8), 8, 0, 100)
     s.subtitle_max_chars = _int(c.get("subtitle_max_chars", 4000), 4000, 200, 20000)
     s.diary_context_count = _int(c.get("diary_context_count", 3), 3, 0, 10)
+    s.vision_api_key = str(c.get("vision_api_key", "") or "").strip()
+    s.vision_api_base = str(c.get("vision_api_base") or "https://api.deepseek.com/v1").strip().rstrip("/")
+    s.vision_model = str(c.get("vision_model") or "deepseek-flash").strip()
     s.vision_provider_id = str(c.get("vision_provider_id", "") or "").strip()
     vm = str(c.get("vision_mode") or "always").strip().lower()
     if vm not in ("always", "auto", "never"):

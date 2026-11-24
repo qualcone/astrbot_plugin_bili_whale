@@ -113,9 +113,28 @@
     "default": "",
     "_special": "select_provider"
   },
+  "vision_api_key": {
+    "description": "识图模型 API Key（直连，推荐）",
+    "hint": "直接填写 DeepSeek 或其他 OpenAI 兼容视觉接口的 API Key。填写后优先走直连，不依赖 AstrBot 内置提供商的识图支持。",
+    "type": "string",
+    "default": "",
+    "secret": true
+  },
+  "vision_api_base": {
+    "description": "识图模型 API 地址（直连）",
+    "hint": "OpenAI 兼容接口地址，DeepSeek 官方为 https://api.deepseek.com/v1。",
+    "type": "string",
+    "default": "https://api.deepseek.com/v1"
+  },
+  "vision_model": {
+    "description": "识图模型名称（直连）",
+    "hint": "直连时使用的模型名，例如 deepseek-flash（需支持图片输入）。",
+    "type": "string",
+    "default": "deepseek-flash"
+  },
   "vision_provider_id": {
-    "description": "识图模型提供商",
-    "hint": "从 AstrBot 已配置的提供商中选择，须选用支持图片输入的模型（如 DeepSeek 的 deepseek-flash）。留空则使用上方文本模型提供商。",
+    "description": "识图模型提供商（备选，仅未填直连 Key 时使用）",
+    "hint": "未填写上方“识图模型 API Key”时，从 AstrBot 已配置的提供商中选择支持图片输入的模型；留空则使用文本模型提供商。",
     "type": "string",
     "default": "",
     "_special": "select_provider"

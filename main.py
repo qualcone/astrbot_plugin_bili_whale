@@ -74,6 +74,8 @@ class BiliWhale(Star):
         """当前使用的文本/识图提供商是否有 DeepSeek（低价时段调度只对 DeepSeek 有意义）。"""
         try:
             c = self.cfg
+            if c.vision_api_key and ("deepseek" in c.vision_api_base.lower() or "deepseek" in c.vision_model.lower()):
+                return True
             provs = [self.context.get_provider_by_id(i) for i in (c.chat_provider_id, c.vision_provider_id) if i]
             if not provs:
                 provs = [self.context.get_using_provider(umo=self._umo() or None)]
@@ -172,8 +174,10 @@ class BiliWhale(Star):
         return ""
 
     def _vision(self):
-        """识图提供商：优先 vision_provider_id；留空时使用聊天提供商（需支持图片输入，如 DeepSeek 的 deepseek-flash）。"""
+        """识图模型：优先直连（vision_api_key）；留空时退回 AstrBot 提供商（vision_provider_id / 聊天提供商）。"""
         c = self.cfg
+        if c.vision_api_key:
+            return fr.DirectVision(c.vision_api_key, c.vision_api_base, c.vision_model)
         pid = c.vision_provider_id or c.chat_provider_id
         try:
             p = self.context.get_provider_by_id(pid) if pid else self.context.get_using_provider(
