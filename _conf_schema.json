@@ -40,14 +40,14 @@
             "default": ""
           },
           "owner_qq": {
-            "description": "目标 QQ 号（自动识别私聊）",
-            "hint": "填写后，该 QQ 首次私聊机器人时会自动记录其会话标识。若下方已填会话标识（UMO），则以 UMO 为准。",
+            "description": "目标用户 ID（如 QQ 号 / 微信 ID，自动识别私聊）",
+            "hint": "填写后，该用户首次私聊机器人时会自动记录其会话标识。若下方已填会话标识（UMO），则以 UMO 为准。",
             "type": "string",
             "default": ""
           },
           "owner_umo": {
             "description": "目标会话标识 UMO（可选）",
-            "hint": "形如 平台ID:FriendMessage:QQ号 或 平台ID:GroupMessage:群号。留空则在目标 QQ 首次私聊时自动记录。",
+            "hint": "形如 平台ID:FriendMessage:用户ID 或 平台ID:GroupMessage:群ID（支持 QQ、微信等）。留空则在目标用户首次私聊时自动记录。",
             "type": "string",
             "default": ""
           },
@@ -95,7 +95,7 @@
     }
   },
   "owner_qq": {
-    "description": "主人 QQ 号（兼容单对话设置）",
+    "description": "主人用户 ID（如 QQ 号 / 微信 ID，兼容单对话设置）",
     "hint": "未配置上方“多组对话”时作为默认私信接收人；若同时配置了多组对话，此项也会作为默认组保留。",
     "type": "string",
     "default": ""

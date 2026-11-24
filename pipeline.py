@@ -314,7 +314,7 @@ class Pipeline:
             return "没有值得分享的"
         n = max(cand, key=lambda x: x["share_score"])
         link = f"https://www.bilibili.com/video/{n['bvid']}"
-        prompt = (GUARD + "\n你要给主人发一条 QQ 私信，分享今晚看到的这个视频。口吻自然简短（80字以内），"
+        prompt = (GUARD + "\n你要给对方发一条私信消息，分享今晚看到的这个视频。口吻自然简短（80字以内），"
                   "包含视频标题和你的一句话感想。只用材料里的信息，不要编造视频内容。\n\n"
                   + fence("视频", f"标题:{n['title']}\n总结:{n['summary']}\n感想:{n['feeling']}"))
         text = (await self.llm(prompt, await self._persona_for(target))).strip()
