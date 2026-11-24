@@ -83,8 +83,9 @@ def migrate_legacy_config(raw_config) -> bool:
             default = LEGACY_DEFAULTS[k]
             legacy_val = raw_config[k]
             nested_val = sec.get(k, default)
-            if legacy_val != default and nested_val == default:
-                sec[k] = copy.deepcopy(legacy_val)
+            if legacy_val != default:
+                if nested_val == default:
+                    sec[k] = copy.deepcopy(legacy_val)
                 raw_config[k] = copy.deepcopy(default)
                 changed = True
     return changed

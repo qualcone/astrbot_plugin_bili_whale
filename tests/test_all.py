@@ -628,9 +628,16 @@ def test_schema_sections_and_legacy_migration():
     assert raw["livingmemory_auto_connect"] is True
     assert migrate_legacy_config(raw) is False
 
+    # 新旧键同时非默认时，保留新键且清理旧键避免后续复活
+    raw["sessdata"] = "old_cookie"
+    raw["bilibili_section"]["sessdata"] = "new_cookie"
+    assert migrate_legacy_config(raw) is True
+    assert raw["bilibili_section"]["sessdata"] == "new_cookie"
+    assert raw["sessdata"] == ""
+
     # 3. parse_settings 直接读取新版嵌套结构
     s = parse_settings(raw)
-    assert s.sessdata == "cookie_xyz"
+    assert s.sessdata == "new_cookie"
     assert s.vision_api_key == "sk-ds-123"
     assert s.lm_auto_connect is False
     assert s.interests == ["游戏", "科技"]

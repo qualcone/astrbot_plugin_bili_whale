@@ -350,7 +350,9 @@ class BiliWhale(Star):
             name = getattr(target, "name", "") if target is not None else ""
             logger.warning(f"[bili_whale] 没有目标会话 umo{f' ({name})' if name else ''}：请配置 owner_umo，或让目标先私聊机器人一次")
             return False
-        await self.context.send_message(umo, MessageChain().message(text))
+        sent = await self.context.send_message(umo, MessageChain().message(text))
+        if sent is False:
+            return False
         await self._record_share_history(umo, text)
         return True
 
