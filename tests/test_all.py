@@ -568,3 +568,25 @@ def test_multi_target_share_and_memory(tmp_path):
         ("kA", "pA", "qq:FriendMessage:1", "BV1"),
         ("kB", "pB", "qq:GroupMessage:2", "BV1"),
     ]
+
+
+def test_direct_vision_payload_disables_deepseek_thinking(tmp_path):
+    from astrbot_plugin_bili_whale import frames as fr
+
+    img = tmp_path / "board0.jpg"
+    img.write_bytes(b"\xff\xd8\xff\xd9")
+
+    ds = fr.DirectVision("k", "https://api.deepseek.com/v1", "deepseek-flash")
+    p_ds = ds.build_payload([(img, [1.0, 2.0])], "测试视频")
+    assert p_ds["model"] == "deepseek-flash"
+    assert p_ds["max_tokens"] == 4096
+    assert p_ds["thinking"] == {"type": "disabled"}
+    content = p_ds["messages"][0]["content"]
+    assert content[0]["type"] == "text"
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+    other = fr.DirectVision("k", "https://api.openai.com/v1", "gpt-4o")
+    p_other = other.build_payload([(img, [1.0])], "测试视频")
+    assert "thinking" not in p_other
+    assert p_other["max_tokens"] == 4096

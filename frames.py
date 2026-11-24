@@ -175,11 +175,14 @@ class DirectVision:
         for p, _ in boards:
             b64 = base64.b64encode(Path(p).read_bytes()).decode("ascii")
             content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
-        return {
+        payload: dict = {
             "model": self.model,
             "messages": [{"role": "user", "content": content}],
-            "max_tokens": 1024,
+            "max_tokens": 4096,
         }
+        if "deepseek" in self.api_base.lower() or "deepseek" in self.model.lower():
+            payload["thinking"] = {"type": "disabled"}
+        return payload
 
     async def describe(self, boards: list[tuple[Path, list[float]]], title: str) -> tuple[str, dict]:
         if not self.api_key:
@@ -207,10 +210,20 @@ class DirectVision:
         except aiohttp.ClientError as e:
             raise FrameError(f"连接识图接口失败：{type(e).__name__}")
         choices = data.get("choices") or []
-        msg = (choices[0].get("message") or {}) if choices and isinstance(choices[0], dict) else {}
-        text = str(msg.get("content") or "").strip()
+        c0 = choices[0] if choices and isinstance(choices[0], dict) else {}
+        msg = c0.get("message") if isinstance(c0.get("message"), dict) else {}
+        raw_content = msg.get("content")
+        if isinstance(raw_content, list):
+            text = "".join(
+                str(part.get("text") or "")
+                for part in raw_content if isinstance(part, dict)
+            ).strip()
+        else:
+            text = str(raw_content or "").strip()
         if not text:
-            raise FrameError("识图接口返回空内容")
+            fr_reason = c0.get("finish_reason") or "unknown"
+            has_rc = bool(msg.get("reasoning_content"))
+            raise FrameError(f"识图接口返回空内容 (finish_reason={fr_reason}, has_reasoning={has_rc})")
         usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
         return text, {
             "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
