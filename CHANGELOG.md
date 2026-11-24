@@ -1,6 +1,14 @@
 # Changelog
 
-格式参考 Keep a Changelog；每次更新插件都要在这里记一笔，并同步 `metadata.yaml` 的 `version`。
+## [0.4.0] - 2026-11-24
+
+### 新增
+- **多组对话配置（`targets`）**：支持配置多组目标对话（私聊或群聊），每组可独立指定目标会话（`owner_qq` / `owner_umo`）、专属人格（`persona_id`）以及独立的 LivingMemory 接口与写入策略（`livingmemory_mode`、`livingmemory_url`、`livingmemory_api_key`、`livingmemory_persona_id`、`livingmemory_scope`）。
+- `/bili status` 与 `/bili lm status` 支持展示多组目标会话及 LivingMemory 连接状态；`/bili lm connect` 支持一次性为多组自动匹配并回填 `persona_id` 与 `scope`。
+
+### 优化
+- 优化配置菜单顺序：B 站账号与请求 → 多组对话配置与兼容单对话配置 → 模型与视觉预算 → LivingMemory 全局默认配置 → 作息与免打扰 → 兴趣与分享限制。
+- 完全兼容旧版单对话顶层配置（`owner_qq`、`owner_umo`、`livingmemory_*`），升级后原有设置自动保留。
 
 ## [0.3.0] - 2026-11-20
 
