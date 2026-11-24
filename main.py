@@ -50,7 +50,8 @@ class BiliWhale(Star):
         self.bili = self._make_bili()
         self.pipeline = Pipeline(
             self.cfg, self.state, self.bili, self._llm, self._persona, self._vision,
-            self._memory, self._send_dm, self.diary_dir, self.run_dir, self.tz, self.ffmpeg, self._peak)
+            self._memory, self._send_dm, self.diary_dir, self.run_dir, self.tz, self.ffmpeg, self._peak,
+            targets_fn=self._targets)
         for w in self.cfg.warnings:
             logger.warning(f"[bili_whale] {w}")
         if not self.ffmpeg:
@@ -86,8 +87,20 @@ class BiliWhale(Star):
             return False
         return is_peak(dt or datetime.now(self.tz), set(self.cfg.peak_holidays))
 
-    def _umo(self) -> str:
-        return self.cfg.owner_umo or self.state.data.get("owner_umo", "")
+    def _targets(self):
+        return self.cfg.effective_targets()
+
+    def _umo(self, target=None) -> str:
+        if target is None or not getattr(target, "key", ""):
+            u = self.cfg.owner_umo or self.state.data.get("owner_umo", "")
+            if u or target is not None:
+                return u
+            for t in self._targets():
+                tu = self._umo(t)
+                if tu:
+                    return tu
+            return ""
+        return target.owner_umo or self.state.data.get("target_umos", {}).get(target.key, "")
 
     async def _provider(self):
         ctx = self.context
@@ -124,25 +137,33 @@ class BiliWhale(Star):
         self.state.add_usage(datetime.now(self.tz).date().isoformat(), chat_tokens=est)
         return redact(text, self.cfg.sessdata)
 
-    async def _persona(self) -> str:
-        """取主人会话的人设；取不到就返回空（不在插件里写死人设）。"""
-        umo = self._umo()
+    async def _persona_prompt_by_id(self, pm, pid: str) -> str:
+        if not pid or pid == "[%None]":
+            return ""
+        p = await _maybe_await(pm.get_persona(pid))
+        if isinstance(p, dict):
+            return p.get("system_prompt") or p.get("prompt") or ""
+        if p is not None:
+            return getattr(p, "system_prompt", None) or getattr(p, "prompt", None) or ""
+        return ""
+
+    async def _persona(self, target=None) -> str:
+        """取目标会话的人设（优先 target.persona_id）；取不到就返回空（不在插件里写死人设）。"""
+        umo = self._umo(target)
         try:
             pm = self.context.persona_manager
             cm = self.context.conversation_manager
+            if target is not None and getattr(target, "persona_id", ""):
+                sp = await self._persona_prompt_by_id(pm, target.persona_id)
+                if sp:
+                    return sp
             if umo:
                 cid = await cm.get_curr_conversation_id(umo)
                 conv = await cm.get_conversation(umo, cid) if cid else None
                 pid = getattr(conv, "persona_id", None)
-                if pid and pid != "[%None]":
-                    p = await _maybe_await(pm.get_persona(pid))
-                    sp = None
-                    if isinstance(p, dict):
-                        sp = p.get("system_prompt") or p.get("prompt")
-                    elif p is not None:
-                        sp = getattr(p, "system_prompt", None)
-                    if sp:
-                        return sp
+                sp = await self._persona_prompt_by_id(pm, pid)
+                if sp:
+                    return sp
             d = await _maybe_await(pm.get_default_persona_v3(umo)) if umo else None
             if d:
                 return d.get("prompt", "") if isinstance(d, dict) else getattr(d, "prompt", "")
@@ -165,15 +186,28 @@ class BiliWhale(Star):
             return None
         return fr.ProviderVision(p, label=pid or "默认聊天提供商")
 
-    def _memory(self):
+    def _memory(self, target=None):
         c = self.cfg
-        if not c.lm_enabled or not c.lm_key:
+        if target is None or not getattr(target, "key", ""):
+            if not c.lm_enabled or not c.lm_key:
+                return None
+            return LMClient(c.lm_url, c.lm_key, c.lm_persona_id, c.lm_scope)
+        if target.lm_mode == "off":
             return None
-        return LMClient(c.lm_url, c.lm_key, c.lm_persona_id, c.lm_scope)
+        enabled = True if target.lm_mode == "on" else c.lm_enabled
+        key = target.lm_key or c.lm_key
+        url = target.lm_url or c.lm_url
+        if not enabled or not key:
+            return None
+        lm_persona = target.lm_persona_id or target.persona_id or c.lm_persona_id
+        lm_scope = target.lm_scope or self._umo(target) or c.lm_scope
+        return LMClient(url, key, lm_persona, lm_scope)
 
-    async def _persona_name(self) -> str:
-        """机器人在主人私聊里当前用的人格名（LivingMemory 按它过滤召回；取不到返回空）。"""
-        umo = self._umo()
+    async def _persona_name(self, target=None) -> str:
+        """机器人在目标会话里当前用的人格名（LivingMemory 按它过滤召回；取不到返回空）。"""
+        if target is not None and getattr(target, "persona_id", ""):
+            return target.persona_id
+        umo = self._umo(target)
         if not umo:
             return ""
         try:
@@ -192,48 +226,90 @@ class BiliWhale(Star):
             return ""
 
     async def _lm_connect(self) -> list[str]:
-        """一键连接 LivingMemory：检测 -> 读 personas/scopes -> 自动选择 -> 启用写入并保存配置。"""
+        """一键连接 LivingMemory：检测 -> 读 personas/scopes -> 自动选择 -> 启用写入并保存配置（支持多组）。"""
         c = self.cfg
-        if not c.lm_key:
+        targets = self._targets()
+        has_any_key = bool(c.lm_key or any(t.lm_key for t in targets))
+        if not has_any_key:
             return ["❌ 未配置 livingmemory_api_key：先在 LivingMemory 打开 external_api 并用 "
                     "/lmem apikey 生成写权限密钥，填进插件配置后再试"]
-        cli = LMClient(c.lm_url, c.lm_key)
-        ok, msg = await cli.health()
-        lines = [f"{'✅' if ok else '❌'} 连接 {c.lm_url}：{msg}"]
-        if not ok:
-            return lines
-        ok, msg, data = await cli.discover()
-        if not ok:
-            return lines + [f"❌ 读取 personas/scopes 失败：{msg}"]
-        if not self._umo():
-            lines.append("  ⚠ 还没记录主人会话：请先用主人 QQ 私聊机器人一次（或配置 owner_umo），否则无法确定 scope")
-        fb = {"scope": self._umo(), "persona_id": await self._persona_name()}
-        t = choose_target(data or {}, [self._umo(), c.owner_qq], fb)
-        lines += ["  " + n for n in t["notes"]]
-        changes = {"livingmemory_enabled": True}
-        if not c.lm_persona_id and t["persona_id"]:
-            changes["livingmemory_persona_id"] = t["persona_id"]
-        if not c.lm_scope and t["scope"]:
-            changes["livingmemory_scope"] = t["scope"]
-        try:
-            for k, v in changes.items():
-                self.raw_config[k] = v
-            self.raw_config.save_config()
-        except Exception as e:
-            return lines + [f"❌ 保存配置失败：{type(e).__name__}（请手动在 WebUI 打开 livingmemory_enabled）"]
-        c.lm_enabled = True
-        c.lm_persona_id = changes.get("livingmemory_persona_id", c.lm_persona_id)
-        c.lm_scope = changes.get("livingmemory_scope", c.lm_scope)
-        lines.append(f"  当前配置：persona={c.lm_persona_id or '(空)'}  scope={c.lm_scope or '(空)'}")
-        if not c.lm_scope:
-            lines.append("  ⚠ scope 仍为空：此时写入的记忆在全局范围，私聊召回不到，请手动填 livingmemory_scope（主人私聊会话）")
-        lines.append("✅ 已启用写入 LivingMemory。下次醒来（或 /bili wake）后，用 /lmem search 看是否多了记忆")
+        lines: list[str] = []
+        raw_targets = self.raw_config.get("targets")
+        changed = False
+        for t in targets:
+            if t.lm_mode == "off":
+                continue
+            url = t.lm_url or c.lm_url
+            key = t.lm_key or c.lm_key
+            if not key:
+                lines.append(f"⚠ [{t.name}] 未配置 LivingMemory API 密钥，已跳过")
+                continue
+            cli = LMClient(url, key)
+            ok, msg = await cli.health()
+            prefix = f"[{t.name}] " if len(targets) > 1 or t.key else ""
+            lines.append(f"{'✅' if ok else '❌'} {prefix}连接 {url}：{msg}")
+            if not ok:
+                continue
+            ok, msg, data = await cli.discover()
+            if not ok:
+                lines.append(f"❌ {prefix}读取 personas/scopes 失败：{msg}")
+                continue
+            umo = self._umo(t)
+            if not umo:
+                lines.append(f"  ⚠ {prefix}还没记录会话：请先用目标 QQ 私聊机器人一次（或配置 owner_umo），否则无法确定 scope")
+            fb = {"scope": umo, "persona_id": await self._persona_name(t)}
+            picked = choose_target(data or {}, [umo, t.owner_qq], fb)
+            lines += ["  " + prefix + n for n in picked["notes"]]
+            if not t.key:
+                changes = {"livingmemory_enabled": True}
+                if not c.lm_persona_id and picked["persona_id"]:
+                    changes["livingmemory_persona_id"] = picked["persona_id"]
+                if not c.lm_scope and picked["scope"]:
+                    changes["livingmemory_scope"] = picked["scope"]
+                for k, v in changes.items():
+                    self.raw_config[k] = v
+                c.lm_enabled = True
+                c.lm_persona_id = changes.get("livingmemory_persona_id", c.lm_persona_id)
+                c.lm_scope = changes.get("livingmemory_scope", c.lm_scope)
+                changed = True
+                lines.append(f"  {prefix}当前配置：persona={c.lm_persona_id or '(空)'}  scope={c.lm_scope or '(空)'}")
+            else:
+                if isinstance(raw_targets, list):
+                    for item in raw_targets:
+                        if not isinstance(item, dict):
+                            continue
+                        item_umo = str(item.get("owner_umo", "") or "").strip()
+                        item_qq = str(item.get("owner_qq", "") or "").strip()
+                        if (t.owner_umo and item_umo == t.owner_umo) or (t.owner_qq and item_qq == t.owner_qq):
+                            if not t.lm_persona_id and picked["persona_id"]:
+                                item["livingmemory_persona_id"] = picked["persona_id"]
+                                t.lm_persona_id = picked["persona_id"]
+                                changed = True
+                            if not t.lm_scope and picked["scope"]:
+                                item["livingmemory_scope"] = picked["scope"]
+                                t.lm_scope = picked["scope"]
+                                changed = True
+                if not c.lm_enabled and t.lm_mode == "inherit":
+                    self.raw_config["livingmemory_enabled"] = True
+                    c.lm_enabled = True
+                    changed = True
+                lines.append(
+                    f"  {prefix}当前配置：persona={t.lm_persona_id or c.lm_persona_id or '(空)'}  "
+                    f"scope={t.lm_scope or umo or c.lm_scope or '(空)'}"
+                )
+        if changed:
+            try:
+                self.raw_config.save_config()
+            except Exception as e:
+                return lines + [f"❌ 保存配置失败：{type(e).__name__}（请手动在 WebUI 打开 livingmemory_enabled）"]
+        lines.append("✅ 已完成 LivingMemory 连接。下次醒来（或 /bili wake）后，用 /lmem search 看是否多了记忆")
         return lines
 
-    async def _send_dm(self, text: str) -> bool:
-        umo = self._umo()
+    async def _send_dm(self, text: str, target=None) -> bool:
+        umo = self._umo(target)
         if not umo:
-            logger.warning("[bili_whale] 没有主人会话 umo：请配置 owner_umo，或让主人先私聊机器人一次")
+            name = getattr(target, "name", "") if target is not None else ""
+            logger.warning(f"[bili_whale] 没有目标会话 umo{f' ({name})' if name else ''}：请配置 owner_umo，或让目标先私聊机器人一次")
             return False
         await self.context.send_message(umo, MessageChain().message(text))
         return True
@@ -280,12 +356,22 @@ class BiliWhale(Star):
     # ---------- 记录主人会话 ----------
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     async def record_owner(self, event: AstrMessageEvent):
-        if self.cfg.owner_qq and str(event.get_sender_id()) == self.cfg.owner_qq \
+        sender = str(event.get_sender_id())
+        saved = False
+        if self.cfg.owner_qq and sender == self.cfg.owner_qq \
                 and not self.cfg.owner_umo \
                 and self.state.data.get("owner_umo") != event.unified_msg_origin:
             self.state.data["owner_umo"] = event.unified_msg_origin
+            saved = True
+        for t in self.cfg.targets:
+            if t.enabled and t.owner_qq and sender == t.owner_qq and not t.owner_umo:
+                tumos = self.state.data.setdefault("target_umos", {})
+                if tumos.get(t.key) != event.unified_msg_origin:
+                    tumos[t.key] = event.unified_msg_origin
+                    saved = True
+        if saved:
             self.state.save()
-            logger.info("[bili_whale] 已记录主人会话")
+            logger.info("[bili_whale] 已记录目标会话")
 
     # ---------- 命令 ----------
     @filter.command_group("bili")
@@ -306,9 +392,16 @@ class BiliWhale(Star):
         except BiliError as e:
             ok, ck = False, str(e)
         u = self.state.usage(date)
-        lm = self._memory()
-        lm_line = "未启用" if lm is None else (self.state.data.get("lm_last") or "尚无写入记录")
-        if lm is not None and not self.cfg.lm_scope:
+        targets = self._targets()
+        ready_cnt = sum(1 for t in targets if self._umo(t))
+        target_line = (
+            f"{'已记录' if ready_cnt else '❌ 未记录'}"
+            if len(targets) == 1 and not targets[0].key
+            else f"{len(targets)} 组（已就绪 {ready_cnt}/{len(targets)}）"
+        )
+        lm = self._memory() or any(self._memory(t) for t in targets)
+        lm_line = "未启用" if not lm else (self.state.data.get("lm_last") or "尚无写入记录")
+        if lm and not self.cfg.lm_scope and not any(t.lm_scope or self._umo(t) for t in targets):
             lm_line += "（⚠ scope 为空：记忆会写入全局范围，私聊召回不到，请发 /bili lm connect）"
         risk = self.state.risk_today(date)
         lines = [
@@ -320,7 +413,7 @@ class BiliWhale(Star):
             f"cookie：{'✅' if ok else '❌'} {ck}",
             f"ffmpeg：{'✅ ' + self.ffmpeg if self.ffmpeg else '❌ 未安装（只读文字模式）'}",
             f"LivingMemory：{lm_line}",
-            f"主人会话：{'已记录' if self._umo() else '❌ 未记录'}",
+            f"目标会话：{target_line}",
             f"风控停止：{risk or '无'}",
             "DeepSeek 计价：" + (
                 ("🔴 现在是高价时段（北京时间），最早 "
@@ -381,15 +474,25 @@ class BiliWhale(Star):
         if not event.is_admin():
             return
         if action == "status":
-            cli = self._memory() or (LMClient(self.cfg.lm_url, self.cfg.lm_key) if self.cfg.lm_key else None)
-            if cli is None:
-                yield event.plain_result("未配置 livingmemory_api_key；发 /bili lm connect 查看一键连接步骤")
-                return
-            ok, msg = await cli.health()
-            ok2, m2 = await cli.personas()
-            yield event.plain_result(
-                f"启用：{'是' if self.cfg.lm_enabled else '否'}  persona={self.cfg.lm_persona_id or '(空)'} "
-                f"scope={self.cfg.lm_scope or '(空)'}\n{'✅' if ok else '❌'} {msg}\n{'✅' if ok2 else '❌'} {m2}")
+            targets = self._targets()
+            lines = []
+            for t in targets:
+                cli = self._memory(t)
+                url = t.lm_url or self.cfg.lm_url
+                key = t.lm_key or self.cfg.lm_key
+                if cli is None and not key:
+                    lines.append(f"[{t.name}] 未配置 API 密钥")
+                    continue
+                probe = cli or LMClient(url, key)
+                ok, msg = await probe.health()
+                ok2, m2 = await probe.personas()
+                lines.append(
+                    f"[{t.name}] 启用：{'是' if cli else '否'}  "
+                    f"persona={(cli.persona_id if cli else t.lm_persona_id) or '(空)'}  "
+                    f"scope={(cli.scope if cli else t.lm_scope) or '(空)'}\n"
+                    f"  {'✅' if ok else '❌'} {msg} | {'✅' if ok2 else '❌'} {m2}"
+                )
+            yield event.plain_result("\n".join(lines) or "未配置目标会话")
             return
         yield event.plain_result("\n".join(await self._lm_connect()))
 

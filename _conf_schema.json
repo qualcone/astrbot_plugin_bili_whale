@@ -18,15 +18,168 @@
     "type": "string",
     "default": "2-4"
   },
+  "targets": {
+    "description": "多组对话与人格/记忆配置（推荐）",
+    "hint": "可添加多组目标对话，每组可独立指定接收会话（QQ 私聊或 UMO）、专属人格及 LivingMemory 接口。留空时沿用下方的“主人 QQ 号 / 主人会话标识”和全局 LivingMemory 设置。",
+    "type": "template_list",
+    "default": [],
+    "templates": {
+      "target_profile": {
+        "name": "目标对话组",
+        "hint": "为一个私聊或群聊会话配置独立的人格与 LivingMemory 记忆参数。",
+        "items": {
+          "enabled": {
+            "description": "启用该组",
+            "type": "bool",
+            "default": true
+          },
+          "name": {
+            "description": "备注名称（可选）",
+            "hint": "便于在状态与日志中区分，例如“主号私聊”“测试群”。",
+            "type": "string",
+            "default": ""
+          },
+          "owner_qq": {
+            "description": "目标 QQ 号（自动识别私聊）",
+            "hint": "填写后，该 QQ 首次私聊机器人时会自动记录其会话标识。若下方已填会话标识（UMO），则以 UMO 为准。",
+            "type": "string",
+            "default": ""
+          },
+          "owner_umo": {
+            "description": "目标会话标识 UMO（可选）",
+            "hint": "形如 平台ID:FriendMessage:QQ号 或 平台ID:GroupMessage:群号。留空则在目标 QQ 首次私聊时自动记录。",
+            "type": "string",
+            "default": ""
+          },
+          "persona_id": {
+            "description": "该对话使用的人格（可选）",
+            "hint": "填写 AstrBot 中已配置的人格名称；留空则自动读取该会话当前使用的人格。",
+            "type": "string",
+            "default": ""
+          },
+          "livingmemory_mode": {
+            "description": "LivingMemory 写入策略",
+            "hint": "跟随全局：使用下方全局 LivingMemory 开关；开启/关闭：仅针对该组单独开关。",
+            "type": "string",
+            "default": "inherit",
+            "options": ["inherit", "on", "off"],
+            "labels": ["跟随全局", "开启", "关闭"]
+          },
+          "livingmemory_url": {
+            "description": "LivingMemory 接口地址（可选）",
+            "hint": "留空则继承下方全局 LivingMemory 外部接口地址。",
+            "type": "string",
+            "default": ""
+          },
+          "livingmemory_api_key": {
+            "description": "LivingMemory API 密钥（可选）",
+            "hint": "留空则继承下方全局 LivingMemory API 密钥。",
+            "type": "string",
+            "default": "",
+            "secret": true
+          },
+          "livingmemory_persona_id": {
+            "description": "记忆所属人格 ID（可选）",
+            "hint": "留空时在 /bili lm connect 自动匹配，或默认使用上方所选人格。",
+            "type": "string",
+            "default": ""
+          },
+          "livingmemory_scope": {
+            "description": "记忆所属会话范围（可选）",
+            "hint": "留空时自动匹配为该组目标会话的 UMO，确保在该对话中能正常召回。",
+            "type": "string",
+            "default": ""
+          }
+        }
+      }
+    }
+  },
   "owner_qq": {
-    "description": "主人 QQ 号",
-    "hint": "私信的唯一接收人。主人首次私聊机器人后，插件会自动记录其会话。",
+    "description": "主人 QQ 号（兼容单对话设置）",
+    "hint": "未配置上方“多组对话”时作为默认私信接收人；若同时配置了多组对话，此项也会作为默认组保留。",
     "type": "string",
     "default": ""
   },
   "owner_umo": {
-    "description": "主人会话标识（可选）",
-    "hint": "主人私聊的 unified_msg_origin。留空则在主人首次私聊时自动记录。",
+    "description": "主人会话标识（兼容单对话设置，可选）",
+    "hint": "默认私聊的 unified_msg_origin。留空则在主人首次私聊时自动记录。",
+    "type": "string",
+    "default": ""
+  },
+  "chat_provider_id": {
+    "description": "文本模型提供商",
+    "hint": "用于打分、总结与写日记。留空则使用目标会话当前的聊天提供商。",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider"
+  },
+  "vision_provider_id": {
+    "description": "识图模型提供商",
+    "hint": "从 AstrBot 已配置的提供商中选择，须选用支持图片输入的模型（如 DeepSeek 的 deepseek-flash）。留空则使用上方文本模型提供商。",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider"
+  },
+  "vision_mode": {
+    "description": "画面理解策略",
+    "hint": "始终：深看时都读取画面；自动：仅在无字幕或字幕过短时读取；关闭：不读取画面。",
+    "type": "string",
+    "default": "always",
+    "options": ["always", "auto", "never"],
+    "labels": ["始终", "自动", "关闭"]
+  },
+  "max_frames_per_video": {
+    "description": "单视频抽帧上限（帧）",
+    "hint": "每 9 帧拼合为一张 3×3 分镜图后提交识图模型。需要 ffmpeg；未安装时降级为仅读文字。",
+    "type": "int",
+    "default": 18
+  },
+  "max_images_per_night": {
+    "description": "每晚分镜图上限（张）",
+    "hint": "单晚提交识图模型的分镜图总数上限。",
+    "type": "int",
+    "default": 8
+  },
+  "max_tokens_per_night": {
+    "description": "每晚 Token 预算",
+    "hint": "文本与识图合计（文本部分为估算）。达到后停止深看，仅用已有素材写日记；0 表示不限制。",
+    "type": "int",
+    "default": 100000
+  },
+  "livingmemory_enabled": {
+    "description": "写入 LivingMemory（全局默认）",
+    "hint": "开启后，每个深看的视频写入一条长期记忆。建议通过 /bili lm connect 一键连接并自动启用。",
+    "type": "bool",
+    "default": false
+  },
+  "livingmemory_auto_connect": {
+    "description": "启动时自动连接 LivingMemory",
+    "hint": "已填写 API 密钥时，插件启动后自动检测接口、选择人格与会话范围并启用写入；已手动填写的人格与会话范围不会被覆盖。也可随时发送 /bili lm connect。",
+    "type": "bool",
+    "default": true
+  },
+  "livingmemory_url": {
+    "description": "LivingMemory 外部接口地址（全局默认）",
+    "hint": "需在 LivingMemory 中启用“外部记忆 API”（版本 ≥ 2.11.0），默认监听 http://127.0.0.1:7801。",
+    "type": "string",
+    "default": "http://127.0.0.1:7801"
+  },
+  "livingmemory_api_key": {
+    "description": "LivingMemory API 密钥（全局默认）",
+    "hint": "通过 /lmem apikey create <名称> write 生成，需要写权限。令牌仅显示一次。",
+    "type": "string",
+    "default": "",
+    "secret": true
+  },
+  "livingmemory_persona_id": {
+    "description": "记忆所属人格 ID（全局默认）",
+    "hint": "对应私聊所用人格的名称，召回时按此精确匹配。留空时由 /bili lm connect 自动填写。",
+    "type": "string",
+    "default": ""
+  },
+  "livingmemory_scope": {
+    "description": "记忆所属会话范围（全局默认）",
+    "hint": "对应主人私聊会话（形如 平台ID:FriendMessage:QQ号）。留空时由 /bili lm connect 自动填写；若为空，记忆将写入全局范围，私聊无法召回。",
     "type": "string",
     "default": ""
   },
@@ -112,85 +265,8 @@
   },
   "max_share_per_day": {
     "description": "每日分享上限（条）",
-    "hint": "每天最多私信给主人的视频分享条数，设为 0 则不分享。",
+    "hint": "每个目标对话每天最多收到的视频分享条数，设为 0 则不分享。",
     "type": "int",
     "default": 1
-  },
-  "chat_provider_id": {
-    "description": "文本模型提供商",
-    "hint": "用于打分、总结与写日记。留空则使用主人会话当前的聊天提供商。",
-    "type": "string",
-    "default": "",
-    "_special": "select_provider"
-  },
-  "vision_provider_id": {
-    "description": "识图模型提供商",
-    "hint": "从 AstrBot 已配置的提供商中选择，须选用支持图片输入的模型（如 DeepSeek 的 deepseek-flash）。留空则使用上方文本模型提供商。",
-    "type": "string",
-    "default": "",
-    "_special": "select_provider"
-  },
-  "vision_mode": {
-    "description": "画面理解策略",
-    "hint": "始终：深看时都读取画面；自动：仅在无字幕或字幕过短时读取；关闭：不读取画面。",
-    "type": "string",
-    "default": "always",
-    "options": ["always", "auto", "never"],
-    "labels": ["始终", "自动", "关闭"]
-  },
-  "max_frames_per_video": {
-    "description": "单视频抽帧上限（帧）",
-    "hint": "每 9 帧拼合为一张 3×3 分镜图后提交识图模型。需要 ffmpeg；未安装时降级为仅读文字。",
-    "type": "int",
-    "default": 18
-  },
-  "max_images_per_night": {
-    "description": "每晚分镜图上限（张）",
-    "hint": "单晚提交识图模型的分镜图总数上限。",
-    "type": "int",
-    "default": 8
-  },
-  "max_tokens_per_night": {
-    "description": "每晚 Token 预算",
-    "hint": "文本与识图合计（文本部分为估算）。达到后停止深看，仅用已有素材写日记；0 表示不限制。",
-    "type": "int",
-    "default": 100000
-  },
-  "livingmemory_enabled": {
-    "description": "写入 LivingMemory",
-    "hint": "开启后，每个深看的视频写入一条长期记忆。建议通过 /bili lm connect 一键连接并自动启用。",
-    "type": "bool",
-    "default": false
-  },
-  "livingmemory_auto_connect": {
-    "description": "启动时自动连接 LivingMemory",
-    "hint": "已填写 API 密钥时，插件启动后自动检测接口、选择人格与会话范围并启用写入；已手动填写的人格与会话范围不会被覆盖。也可随时发送 /bili lm connect。",
-    "type": "bool",
-    "default": true
-  },
-  "livingmemory_url": {
-    "description": "LivingMemory 外部接口地址",
-    "hint": "需在 LivingMemory 中启用“外部记忆 API”（版本 ≥ 2.11.0），默认监听 http://127.0.0.1:7801。",
-    "type": "string",
-    "default": "http://127.0.0.1:7801"
-  },
-  "livingmemory_api_key": {
-    "description": "LivingMemory API 密钥",
-    "hint": "通过 /lmem apikey create <名称> write 生成，需要写权限。令牌仅显示一次。",
-    "type": "string",
-    "default": "",
-    "secret": true
-  },
-  "livingmemory_persona_id": {
-    "description": "记忆所属人格 ID",
-    "hint": "对应私聊所用人格的名称，召回时按此精确匹配。留空时由 /bili lm connect 自动填写。",
-    "type": "string",
-    "default": ""
-  },
-  "livingmemory_scope": {
-    "description": "记忆所属会话范围",
-    "hint": "对应主人私聊会话（形如 平台ID:FriendMessage:QQ号）。留空时由 /bili lm connect 自动填写；若为空，记忆将写入全局范围，私聊无法召回。",
-    "type": "string",
-    "default": ""
   }
 }

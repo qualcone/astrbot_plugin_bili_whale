@@ -59,12 +59,60 @@ def parse_interval(s, default=(2.0, 4.0)):
 
 
 @dataclass
+class TargetConfig:
+    """单个目标对话（及对应人格、LivingMemory）配置。"""
+    key: str = ""
+    enabled: bool = True
+    name: str = ""
+    owner_qq: str = ""
+    owner_umo: str = ""
+    persona_id: str = ""
+    lm_mode: str = "inherit"   # inherit | on | off
+    lm_url: str = ""
+    lm_key: str = ""
+    lm_persona_id: str = ""
+    lm_scope: str = ""
+
+
+def _parse_targets(raw, warnings: list[str]) -> list[TargetConfig]:
+    out: list[TargetConfig] = []
+    if not isinstance(raw, list):
+        return out
+    for idx, item in enumerate(raw):
+        if not isinstance(item, dict):
+            continue
+        qq = str(item.get("owner_qq", "") or "").strip()
+        umo = str(item.get("owner_umo", "") or "").strip()
+        name = str(item.get("name", "") or "").strip()
+        lm_mode = str(item.get("livingmemory_mode") or "inherit").strip().lower()
+        if lm_mode not in ("inherit", "on", "off"):
+            warnings.append(f"第 {idx + 1} 组目标的 livingmemory_mode 非法，已用 inherit: {lm_mode}")
+            lm_mode = "inherit"
+        key = umo or (f"qq:{qq}" if qq else f"idx:{idx}")
+        out.append(TargetConfig(
+            key=key,
+            enabled=bool(item.get("enabled", True)),
+            name=name or umo or (f"QQ {qq}" if qq else f"对话组{idx + 1}"),
+            owner_qq=qq,
+            owner_umo=umo,
+            persona_id=str(item.get("persona_id", "") or "").strip(),
+            lm_mode=lm_mode,
+            lm_url=str(item.get("livingmemory_url") or "").strip().rstrip("/"),
+            lm_key=str(item.get("livingmemory_api_key", "") or "").strip(),
+            lm_persona_id=str(item.get("livingmemory_persona_id", "") or "").strip(),
+            lm_scope=str(item.get("livingmemory_scope", "") or "").strip(),
+        ))
+    return out
+
+
+@dataclass
 class Settings:
     sessdata: str = ""
     bili_jct: str = ""
     buvid3: str = ""
     owner_qq: str = ""
     owner_umo: str = ""
+    targets: list[TargetConfig] = field(default_factory=list)
     windows: list[str] = field(default_factory=list)
     wakes_per_window: int = 1
     skip_probability: float = 0.1
@@ -94,6 +142,37 @@ class Settings:
     peak_holidays: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
+    def effective_targets(self) -> list[TargetConfig]:
+        """返回生效的目标对话列表；若同时存在旧版顶层设置且未在 targets 中重复配置，则自动保留。"""
+        enabled = [t for t in self.targets if t.enabled]
+        if not self.targets:
+            return [TargetConfig(
+                key="",
+                enabled=True,
+                name="默认主人会话",
+                owner_qq=self.owner_qq,
+                owner_umo=self.owner_umo,
+                persona_id="",
+                lm_mode="inherit",
+            )]
+        has_legacy_in_list = any(
+            (self.owner_umo and t.owner_umo == self.owner_umo)
+            or (self.owner_qq and t.owner_qq == self.owner_qq)
+            for t in self.targets
+        )
+        if (self.owner_qq or self.owner_umo) and not has_legacy_in_list:
+            legacy = TargetConfig(
+                key="",
+                enabled=True,
+                name="默认主人会话",
+                owner_qq=self.owner_qq,
+                owner_umo=self.owner_umo,
+                persona_id="",
+                lm_mode="inherit",
+            )
+            return [legacy] + enabled
+        return enabled
+
 
 def parse_settings(c) -> Settings:
     c = c or {}
@@ -104,6 +183,7 @@ def parse_settings(c) -> Settings:
     s.buvid3 = str(c.get("buvid3", "") or "").strip()
     s.owner_qq = str(c.get("owner_qq", "") or "").strip()
     s.owner_umo = str(c.get("owner_umo", "") or "").strip()
+    s.targets = _parse_targets(c.get("targets"), s.warnings)
     wins = []
     for w in to_list(c.get("schedule_windows", ["21:00-23:00"])):
         if parse_window(w):

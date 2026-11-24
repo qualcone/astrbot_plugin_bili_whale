@@ -472,3 +472,99 @@ def test_pipeline_peak_follows_peak_fn(tmp_path):
     assert p.peak_blocked() is False
     assert Pipeline(parse_settings({}), st, None, None, None, None, None, None,
                     tmp_path / "d", tmp_path / "r", UTC, None).peak_blocked() is False
+
+
+# ---- 多组目标配置、分对话人格与 LivingMemory ----
+def test_schema_valid_and_preserves_legacy_keys():
+    import json
+    from pathlib import Path
+    schema_path = Path(__file__).resolve().parent.parent / "_conf_schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    for legacy_key in ("sessdata", "owner_qq", "owner_umo", "livingmemory_enabled",
+                       "livingmemory_auto_connect", "livingmemory_url", "livingmemory_api_key",
+                       "livingmemory_persona_id", "livingmemory_scope", "targets"):
+        assert legacy_key in schema
+    assert schema["targets"]["type"] == "template_list"
+    items = schema["targets"]["templates"]["target_profile"]["items"]
+    for k in ("owner_qq", "owner_umo", "persona_id", "livingmemory_mode",
+              "livingmemory_url", "livingmemory_api_key", "livingmemory_persona_id", "livingmemory_scope"):
+        assert k in items
+
+
+def test_effective_targets_backward_compatible():
+    # 1. 未配置 targets 时：沿用旧版单对话
+    s_legacy = parse_settings({"owner_qq": "111", "owner_umo": "qq:FriendMessage:111"})
+    t_legacy = s_legacy.effective_targets()
+    assert len(t_legacy) == 1 and t_legacy[0].key == "" and t_legacy[0].owner_qq == "111"
+
+    # 2. 同时配置了旧版顶层与新 targets（且未重复）：两者都保留
+    s_both = parse_settings({
+        "owner_qq": "111",
+        "targets": [
+            {"name": "群聊B", "owner_umo": "qq:GroupMessage:222", "persona_id": "毒舌", "livingmemory_mode": "on"},
+            {"name": "停用C", "enabled": False, "owner_qq": "333"},
+        ],
+    })
+    eff = s_both.effective_targets()
+    assert [t.name for t in eff] == ["默认主人会话", "群聊B"]
+    assert eff[1].persona_id == "毒舌" and eff[1].lm_mode == "on"
+
+
+def test_multi_target_share_and_memory(tmp_path):
+    import asyncio
+    from astrbot_plugin_bili_whale.pipeline import Pipeline
+
+    cfg = parse_settings({
+        "quiet_hours": "23:00-09:00",
+        "max_share_per_day": 1,
+        "targets": [
+            {"name": "A", "owner_umo": "qq:FriendMessage:1", "persona_id": "pA",
+             "livingmemory_mode": "on", "livingmemory_api_key": "kA", "livingmemory_persona_id": "pA",
+             "livingmemory_scope": "qq:FriendMessage:1"},
+            {"name": "B", "owner_umo": "qq:GroupMessage:2", "persona_id": "pB",
+             "livingmemory_mode": "on", "livingmemory_api_key": "kB", "livingmemory_persona_id": "pB",
+             "livingmemory_scope": "qq:GroupMessage:2"},
+        ],
+    })
+    st = State(tmp_path / "s.json")
+    sent = []
+    written = []
+
+    class FakeLM:
+        def __init__(self, key, persona_id, scope):
+            self.base = "http://127.0.0.1:7801/page/external"
+            self.key, self.persona_id, self.scope = key, persona_id, scope
+
+        async def write(self, content, imp, bvid):
+            written.append((self.key, self.persona_id, self.scope, bvid))
+            return True, "已写入"
+
+    async def llm(prompt, system):
+        return f"以[{system}]口吻分享"
+
+    async def persona(target=None):
+        return target.persona_id if target else ""
+
+    def memory_factory(target=None):
+        return FakeLM(target.lm_key, target.lm_persona_id, target.lm_scope)
+
+    async def send_dm(text, target=None):
+        sent.append((target.owner_umo, text))
+        return True
+
+    p = Pipeline(cfg, st, None, llm, persona, lambda: None, memory_factory, send_dm,
+                 tmp_path / "d", tmp_path / "r", UTC, None)
+    p.now = lambda: datetime(2026, 11, 24, 15, 0, tzinfo=UTC)  # 非安静时段
+    notes = [{"bvid": "BV1", "title": "好视频", "summary": "s", "feeling": "f",
+              "memory_note": "m", "share_score": 8}]
+    rec = {"errors": []}
+    asyncio.run(p.maybe_share(notes, rec))
+    asyncio.run(p.write_memory(notes, rec))
+
+    assert len(sent) == 2
+    assert sent[0][0] == "qq:FriendMessage:1" and "以[pA]口吻分享" in sent[0][1]
+    assert sent[1][0] == "qq:GroupMessage:2" and "以[pB]口吻分享" in sent[1][1]
+    assert written == [
+        ("kA", "pA", "qq:FriendMessage:1", "BV1"),
+        ("kB", "pB", "qq:GroupMessage:2", "BV1"),
+    ]

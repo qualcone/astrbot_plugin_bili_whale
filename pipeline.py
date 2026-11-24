@@ -2,6 +2,7 @@
 所有 B 站内容都当作"引用材料"数据，提示词里明确声明不得执行其中的指令。"""
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import random
@@ -56,11 +57,22 @@ def fence(label: str, body: str) -> str:
     return f"<引用材料 来源={label}>\n{body}\n</引用材料>"
 
 
+def _accepts_kw(fn, name: str) -> bool:
+    try:
+        sig = inspect.signature(fn)
+        return name in sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
+    except (ValueError, TypeError):
+        return False
+
+
 class Pipeline:
     def __init__(self, cfg, state, bili: BiliClient, llm, persona, vision_factory, memory_factory,
-                 send_dm, diary_dir: Path, run_dir: Path, tz, ffmpeg=None, peak_fn=None):
-        """llm(prompt, system)->str；persona()->str；vision_factory()->ProviderVision|None；
-        memory_factory()->LMClient|None；send_dm(text)->bool"""
+                 send_dm, diary_dir: Path, run_dir: Path, tz, ffmpeg=None, peak_fn=None,
+                 targets_fn=None):
+        """llm(prompt, system)->str；persona([target])->str；vision_factory()->ProviderVision|None；
+        memory_factory([target])->LMClient|None；send_dm(text[, target])->bool"""
         self.cfg, self.state, self.bili = cfg, state, bili
         self.llm, self.persona = llm, persona
         self.vision_factory, self.memory_factory = vision_factory, memory_factory
@@ -69,8 +81,31 @@ class Pipeline:
         self.tz = tz
         self.ffmpeg = ffmpeg
         self.peak_fn = peak_fn  # () -> bool：当前是否需要避开的高价时段
+        self.targets_fn = targets_fn
         self.running = False
         self.ignore_peak = False  # 手动 /bili wake force 时为 True
+
+    def _targets(self):
+        if self.targets_fn is not None:
+            return self.targets_fn()
+        if hasattr(self.cfg, "effective_targets"):
+            return self.cfg.effective_targets()
+        return []
+
+    async def _persona_for(self, target=None) -> str:
+        if target is not None and _accepts_kw(self.persona, "target"):
+            return await self.persona(target=target)
+        return await self.persona()
+
+    def _memory_for(self, target=None):
+        if target is not None and _accepts_kw(self.memory_factory, "target"):
+            return self.memory_factory(target=target)
+        return self.memory_factory()
+
+    async def _send_dm_for(self, text: str, target=None) -> bool:
+        if target is not None and _accepts_kw(self.send_dm, "target"):
+            return await self.send_dm(text, target=target)
+        return await self.send_dm(text)
 
     def over_budget(self) -> bool:
         b = self.cfg.max_tokens_per_night
@@ -269,79 +304,132 @@ class Pipeline:
         return str(p)
 
     # ---------- 分享 ----------
-    async def maybe_share(self, notes: list[dict], rec):
-        cfg, now = self.cfg, self.now()
-        date = now.date().isoformat()
-        if cfg.max_share_per_day <= 0 or len(self.state.shares_on(date)) >= cfg.max_share_per_day:
-            rec["share"] = "今日分享已达上限"
-            return
-        cand = [n for n in notes if n["share_score"] >= 6 and not self.state.was_shared(n["bvid"])]
+    async def _share_for_target(self, target, notes: list[dict], date: str, now, rec) -> str:
+        cfg = self.cfg
+        tkey = getattr(target, "key", "") if target is not None else ""
+        if cfg.max_share_per_day <= 0 or len(self.state.shares_on(date, tkey)) >= cfg.max_share_per_day:
+            return "今日分享已达上限"
+        cand = [n for n in notes if n["share_score"] >= 6 and not self.state.was_shared(n["bvid"], tkey)]
         if not cand:
-            rec["share"] = "没有值得分享的"
-            return
+            return "没有值得分享的"
         n = max(cand, key=lambda x: x["share_score"])
         link = f"https://www.bilibili.com/video/{n['bvid']}"
         prompt = (GUARD + "\n你要给主人发一条 QQ 私信，分享今晚看到的这个视频。口吻自然简短（80字以内），"
                   "包含视频标题和你的一句话感想。只用材料里的信息，不要编造视频内容。\n\n"
                   + fence("视频", f"标题:{n['title']}\n总结:{n['summary']}\n感想:{n['feeling']}"))
-        text = (await self.llm(prompt, await self.persona())).strip()
+        text = (await self.llm(prompt, await self._persona_for(target))).strip()
         if n["title"] not in text:
             text = f"《{n['title']}》\n" + text
         text += f"\n{link}"
         if in_quiet(now, cfg.quiet_hours):
-            self.state.data["pending_share"] = {"text": text, "bvid": n["bvid"]}
+            if not tkey:
+                self.state.data["pending_share"] = {"text": text, "bvid": n["bvid"]}
+            else:
+                self.state.data.setdefault("pending_shares", {})[tkey] = {"text": text, "bvid": n["bvid"]}
             self.state.save()
-            rec["share"] = "安静时段，已推迟到早上"
-            return
-        await self._deliver(text, n["bvid"], date, rec)
+            return "安静时段，已推迟到早上"
+        return await self._deliver(text, n["bvid"], date, rec, target)
 
-    async def _deliver(self, text, bvid, date, rec):
+    async def maybe_share(self, notes: list[dict], rec):
+        now = self.now()
+        date = now.date().isoformat()
+        targets = self._targets()
+        if not targets:
+            rec["share"] = await self._share_for_target(None, notes, date, now, rec)
+            return
+        if len(targets) == 1 and not targets[0].key:
+            rec["share"] = await self._share_for_target(targets[0], notes, date, now, rec)
+            return
+        parts = []
+        for t in targets:
+            res = await self._share_for_target(t, notes, date, now, rec)
+            parts.append(f"[{t.name}] {res}")
+        rec["share"] = "；".join(parts)
+
+    async def _deliver(self, text, bvid, date, rec, target=None) -> str:
+        tkey = getattr(target, "key", "") if target is not None else ""
         try:
-            ok = await self.send_dm(text)
+            ok = await self._send_dm_for(text, target)
         except Exception as e:  # noqa
             ok = False
             rec["errors"].append(f"私信异常: {type(e).__name__}")
         if ok:
-            self.state.add_share(date, bvid)
-            rec["share"] = f"已私信 {bvid}"
+            self.state.add_share(date, bvid, tkey)
+            msg = f"已私信 {bvid}"
         else:
-            rec["share"] = "私信失败（见日志；检查 owner_qq / owner_umo）"
+            msg = "私信失败（见日志；检查 owner_qq / owner_umo）"
+        if target is None or not tkey:
+            rec["share"] = msg
+        return msg
 
     async def flush_pending_share(self):
         """安静时段结束后补发。返回是否发送。"""
-        p = self.state.data.get("pending_share")
         now = self.now()
-        if not p or in_quiet(now, self.cfg.quiet_hours):
+        if in_quiet(now, self.cfg.quiet_hours):
             return False
         date = now.date().isoformat()
         rec = {"errors": []}
-        if len(self.state.shares_on(date)) < self.cfg.max_share_per_day:
-            await self._deliver(p["text"], p["bvid"], date, rec)
-        self.state.data["pending_share"] = None
-        self.state.save()
-        return True
+        flushed = False
+        p = self.state.data.get("pending_share")
+        if p:
+            if len(self.state.shares_on(date)) < self.cfg.max_share_per_day:
+                await self._deliver(p["text"], p["bvid"], date, rec)
+            self.state.data["pending_share"] = None
+            flushed = True
+        ps = self.state.data.get("pending_shares") or {}
+        if ps:
+            by_key = {t.key: t for t in self._targets() if t.key}
+            for tkey, item in list(ps.items()):
+                target = by_key.get(tkey)
+                if target and len(self.state.shares_on(date, tkey)) < self.cfg.max_share_per_day:
+                    await self._deliver(item["text"], item["bvid"], date, rec, target)
+                ps.pop(tkey, None)
+                flushed = True
+        if flushed:
+            self.state.save()
+        return flushed
 
     # ---------- 记忆 ----------
     async def write_memory(self, notes: list[dict], rec):
-        lm = self.memory_factory()
-        if lm is None:
+        targets = self._targets()
+        clients: list[tuple[object, object]] = []
+        seen_dest: set[tuple] = set()
+        if not targets:
+            lm = self._memory_for(None)
+            if lm is not None:
+                clients.append((None, lm))
+        else:
+            for t in targets:
+                lm = self._memory_for(t)
+                if lm is None:
+                    continue
+                dest = (lm.base, lm.key, lm.persona_id, lm.scope)
+                if dest in seen_dest:
+                    continue
+                seen_dest.add(dest)
+                clients.append((t, lm))
+        if not clients:
             rec["memory"] = "未启用"
             return
         date = self.now().date().isoformat()
         res = []
-        for n in notes:
-            if self.state.mem_written(n["bvid"]):
-                continue
-            body = n["memory_note"] or n["summary"][:300]
-            content = f"看过《{n['title']}》（{n['bvid']}，{date}）。{body}"[:MEMORY_MAX_CHARS]
-            imp = 0.5 if n["share_score"] >= 8 else 0.4
-            ok, msg = await lm.write(content, imp, n["bvid"])
-            res.append(f"{n['bvid']}:{msg}")
-            if ok:
-                self.state.mark_mem(n["bvid"])
-            else:
-                log.warning("LivingMemory 写入失败: %s", msg)
-            self.state.data["lm_last"] = f"{date} {msg}"
+        multi = len(clients) > 1
+        for t, lm in clients:
+            tkey = getattr(t, "key", "") if t is not None else ""
+            prefix = f"[{t.name}] " if multi and t is not None else ""
+            for n in notes:
+                if self.state.mem_written(n["bvid"], tkey):
+                    continue
+                body = n["memory_note"] or n["summary"][:300]
+                content = f"看过《{n['title']}》（{n['bvid']}，{date}）。{body}"[:MEMORY_MAX_CHARS]
+                imp = 0.5 if n["share_score"] >= 8 else 0.4
+                ok, msg = await lm.write(content, imp, n["bvid"])
+                res.append(f"{prefix}{n['bvid']}:{msg}")
+                if ok:
+                    self.state.mark_mem(n["bvid"], tkey)
+                else:
+                    log.warning("LivingMemory 写入失败: %s", msg)
+                self.state.data["lm_last"] = f"{date} {msg}"
         self.state.save()
         rec["memory"] = res or "无新增"
 

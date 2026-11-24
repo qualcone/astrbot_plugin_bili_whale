@@ -11,10 +11,14 @@ class State:
         "plans": {},        # "YYYY-MM-DD" -> {window: {"times": [iso], "done": [iso]}}
         "seen": {},         # bvid -> {"date":..., "level": "skim"|"deep"}
         "shares": {},       # "YYYY-MM-DD" -> [bvid]
+        "target_shares": {},    # target_key -> {"YYYY-MM-DD": [bvid]}
         "mem_done": [],     # 已写入 LivingMemory 的 bvid
+        "target_mem_done": {},  # target_key -> [bvid]
         "risk": {},         # {"date":..., "reason":...}
         "pending_share": None,
+        "pending_shares": {},   # target_key -> {"text": ..., "bvid": ...}
         "owner_umo": "",
+        "target_umos": {},      # target_key -> umo
         "usage": {},        # date -> {images, videos, prompt_tokens, completion_tokens}
         "last_run": None,
         "lm_last": "",
@@ -56,24 +60,39 @@ class State:
         self.save()
 
     # ---- 分享 ----
-    def shares_on(self, date: str) -> list:
-        return list(self.data["shares"].get(date, []))
+    def shares_on(self, date: str, target_key: str = "") -> list:
+        if not target_key:
+            return list(self.data["shares"].get(date, []))
+        return list(self.data.setdefault("target_shares", {}).get(target_key, {}).get(date, []))
 
-    def add_share(self, date: str, bvid: str):
-        self.data["shares"].setdefault(date, []).append(bvid)
+    def add_share(self, date: str, bvid: str, target_key: str = ""):
+        if not target_key:
+            self.data["shares"].setdefault(date, []).append(bvid)
+        else:
+            self.data.setdefault("target_shares", {}).setdefault(target_key, {}).setdefault(date, []).append(bvid)
         self.save()
 
-    def was_shared(self, bvid: str) -> bool:
-        return any(bvid in v for v in self.data["shares"].values())
+    def was_shared(self, bvid: str, target_key: str = "") -> bool:
+        if not target_key:
+            return any(bvid in v for v in self.data["shares"].values())
+        return any(bvid in v for v in self.data.setdefault("target_shares", {}).get(target_key, {}).values())
 
     # ---- 记忆 ----
-    def mem_written(self, bvid: str) -> bool:
-        return bvid in self.data["mem_done"]
+    def mem_written(self, bvid: str, target_key: str = "") -> bool:
+        if not target_key:
+            return bvid in self.data["mem_done"]
+        return bvid in self.data.setdefault("target_mem_done", {}).get(target_key, [])
 
-    def mark_mem(self, bvid: str):
-        if bvid not in self.data["mem_done"]:
-            self.data["mem_done"].append(bvid)
-            self.save()
+    def mark_mem(self, bvid: str, target_key: str = ""):
+        if not target_key:
+            if bvid not in self.data["mem_done"]:
+                self.data["mem_done"].append(bvid)
+                self.save()
+        else:
+            arr = self.data.setdefault("target_mem_done", {}).setdefault(target_key, [])
+            if bvid not in arr:
+                arr.append(bvid)
+                self.save()
 
     # ---- 风控 ----
     def set_risk(self, date: str, reason: str):
