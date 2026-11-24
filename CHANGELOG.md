@@ -4,6 +4,7 @@
 
 ### 新增
 - **多组对话配置（`targets`）**：支持配置多组目标对话（私聊或群聊），每组可独立指定目标会话（`owner_qq` / `owner_umo`）、专属人格（`persona_id`）以及独立的 LivingMemory 接口与写入策略（`livingmemory_mode`、`livingmemory_url`、`livingmemory_api_key`、`livingmemory_persona_id`、`livingmemory_scope`）。
+- **AI 主动看视频工具 `bili_watch`**：在聊天中直接发给 AI 视频 BV 号、`bilibili.com` 链接或 `b23.tv` 短链时，AI 可主动调用该工具完整读取视频信息、字幕、热评并抽帧看画面。
 - `/bili status` 与 `/bili lm status` 支持展示多组目标会话及 LivingMemory 连接状态；`/bili lm connect` 支持一次性为多组自动匹配并回填 `persona_id` 与 `scope`。
 
 ### 优化

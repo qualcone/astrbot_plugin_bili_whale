@@ -329,6 +329,24 @@ class BiliClient:
             raise BiliError("取不到视频直链（可能地区限制/需要登录/会员内容）")
         return durl[0]["url"]
 
+    async def resolve_bvid(self, text: str) -> str:
+        """从 BV 号、完整链接或 b23.tv 短链中解析 BV 号。"""
+        bvid = parse_bvid(text)
+        if bvid:
+            return bvid
+        m = B23_RE.search(text or "")
+        if not m:
+            return ""
+        url = m.group(0)
+        if not url.startswith("http"):
+            url = "https://" + url
+        try:
+            async with self._sess().get(url, headers={"User-Agent": UA},
+                                        allow_redirects=True, timeout=self.timeout) as r:
+                return parse_bvid(str(r.url))
+        except Exception:
+            return ""
+
 
 # ---------- 文本格式化（供工具与流水线使用）----------
 def fmt_video_line(i: int, v: dict) -> str:
@@ -338,6 +356,7 @@ def fmt_video_line(i: int, v: dict) -> str:
 
 
 BVID_RE = re.compile(r"BV[0-9A-Za-z]{10}")
+B23_RE = re.compile(r"(?:https?://)?b23\.tv/[0-9A-Za-z]+")
 
 
 def parse_bvid(s: str) -> str:
