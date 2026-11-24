@@ -403,7 +403,12 @@ class Pipeline:
                 lm = self._memory_for(t)
                 if lm is None:
                     continue
-                dest = (lm.base, lm.key, lm.persona_id, lm.scope)
+                dest = (
+                    getattr(lm, "base", ""),
+                    getattr(lm, "key", ""),
+                    getattr(lm, "persona_id", ""),
+                    getattr(lm, "scope", ""),
+                )
                 if dest in seen_dest:
                     continue
                 seen_dest.add(dest)
