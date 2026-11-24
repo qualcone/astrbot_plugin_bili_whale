@@ -150,6 +150,8 @@ def test_lm_payload():
     assert len(p["content"]) == 8000 and p["persona_id"] == "p1" and p["scope"] == "s1"
     assert c.base == "http://127.0.0.1:7801/page/external"
     assert "persona_id" not in LMClient("http://x", "k").build_payload("a", 0.4, "BV2")
+    p_multi = c.build_payload("a", 0.4, "BV1abc", idem_suffix="deadbeef")
+    assert p_multi["idempotency_key"] == "bili-whale-BV1abc-deadbeef"
 
 
 # ---- 配置解析 ----

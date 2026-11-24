@@ -62,11 +62,12 @@ class LMClient:
             return True, f"personas={d.get('personas')} scopes={d.get('scopes')}"
         return False, msg
 
-    def build_payload(self, content: str, importance: float, bvid: str) -> dict:
+    def build_payload(self, content: str, importance: float, bvid: str, idem_suffix: str = "") -> dict:
+        idem = f"bili-whale-{bvid}-{idem_suffix}" if idem_suffix else f"bili-whale-{bvid}"
         p = {
             "content": content[:8000],
             "importance": max(0.0, min(1.0, importance)),
-            "idempotency_key": f"bili-whale-{bvid}",
+            "idempotency_key": idem,
             "source": "bili_whale",
         }
         if self.persona_id:
@@ -75,8 +76,10 @@ class LMClient:
             p["scope"] = self.scope
         return p
 
-    async def write(self, content: str, importance: float, bvid: str):
-        ok, msg, d = await self._req("POST", "/memories", self.build_payload(content, importance, bvid))
+    async def write(self, content: str, importance: float, bvid: str, idem_suffix: str = ""):
+        ok, msg, d = await self._req(
+            "POST", "/memories", self.build_payload(content, importance, bvid, idem_suffix)
+        )
         if ok:
             return True, ("已写入" if d.get("created") else "已存在(幂等跳过)")
         return False, msg

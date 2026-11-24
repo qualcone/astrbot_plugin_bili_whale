@@ -2,6 +2,7 @@
 所有 B 站内容都当作"引用材料"数据，提示词里明确声明不得执行其中的指令。"""
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import logging
@@ -422,13 +423,21 @@ class Pipeline:
         for t, lm in clients:
             tkey = getattr(t, "key", "") if t is not None else ""
             prefix = f"[{t.name}] " if multi and t is not None else ""
+            # 多组写入同一个 LivingMemory 时必须区分 idempotency_key，否则第二组会被服务端幂等跳过
+            idem_suffix = ""
+            if multi or tkey:
+                sig = f"{getattr(lm, 'persona_id', '')}|{getattr(lm, 'scope', '')}|{tkey}"
+                idem_suffix = hashlib.sha1(sig.encode("utf-8")).hexdigest()[:8]
             for n in notes:
                 if self.state.mem_written(n["bvid"], tkey):
                     continue
                 body = n["memory_note"] or n["summary"][:300]
                 content = f"看过《{n['title']}》（{n['bvid']}，{date}）。{body}"[:MEMORY_MAX_CHARS]
                 imp = 0.5 if n["share_score"] >= 8 else 0.4
-                ok, msg = await lm.write(content, imp, n["bvid"])
+                if idem_suffix and _accepts_kw(lm.write, "idem_suffix"):
+                    ok, msg = await lm.write(content, imp, n["bvid"], idem_suffix=idem_suffix)
+                else:
+                    ok, msg = await lm.write(content, imp, n["bvid"])
                 res.append(f"{prefix}{n['bvid']}:{msg}")
                 if ok:
                     self.state.mark_mem(n["bvid"], tkey)
