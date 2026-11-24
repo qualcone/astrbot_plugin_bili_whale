@@ -1,291 +1,569 @@
 {
+  "bilibili_section": {
+    "description": "B 站账号与请求",
+    "hint": "配置 B 站登录态 Cookie 与防风控请求间隔。",
+    "type": "object",
+    "collapsed": false,
+    "items": {
+      "sessdata": {
+        "description": "Bilibili SESSDATA",
+        "hint": "登录态 Cookie，用于读取字幕与评论。建议使用小号。该值仅保存在本配置中，不会写入日志、日记、记忆或私信。",
+        "type": "string",
+        "default": "",
+        "secret": true
+      },
+      "buvid3": {
+        "description": "Bilibili buvid3（可选）",
+        "hint": "浏览器 Cookie 中的 buvid3。留空时插件自动获取；手动填写可降低 HTTP 412 风控概率。",
+        "type": "string",
+        "default": ""
+      },
+      "request_interval_seconds": {
+        "description": "Bilibili 请求间隔（秒）",
+        "hint": "格式为“最小-最大”，每次请求前随机等待。例如 2-4；遇到风控时建议调大，如 4-8。",
+        "type": "string",
+        "default": "2-4"
+      }
+    }
+  },
+  "model_vision_section": {
+    "description": "文本与识图模型",
+    "hint": "配置打分/总结用文本模型，以及抽帧看画面的识图模型与每晚用量上限。",
+    "type": "object",
+    "collapsed": false,
+    "items": {
+      "chat_provider_id": {
+        "description": "文本模型提供商",
+        "hint": "用于打分、总结与写日记。留空则使用目标会话当前的聊天提供商。",
+        "type": "string",
+        "default": "",
+        "_special": "select_provider"
+      },
+      "vision_mode": {
+        "description": "画面理解策略",
+        "hint": "始终：深看时都读取画面；自动：仅在无字幕或字幕过短时读取；关闭：不读取画面。",
+        "type": "string",
+        "default": "always",
+        "options": ["always", "auto", "never"],
+        "labels": ["始终", "自动", "关闭"]
+      },
+      "vision_api_key": {
+        "description": "识图模型 API Key（直连，推荐）",
+        "hint": "直接填写 DeepSeek 或其他 OpenAI 兼容视觉接口的 API Key。填写后优先走直连，不依赖 AstrBot 内置提供商的识图支持。",
+        "type": "string",
+        "default": "",
+        "secret": true
+      },
+      "vision_api_base": {
+        "description": "识图模型 API 地址（直连）",
+        "hint": "OpenAI 兼容接口地址，DeepSeek 官方为 https://api.deepseek.com/v1。",
+        "type": "string",
+        "default": "https://api.deepseek.com/v1"
+      },
+      "vision_model": {
+        "description": "识图模型名称（直连）",
+        "hint": "直连时使用的模型名，例如 deepseek-flash（需支持图片输入）。",
+        "type": "string",
+        "default": "deepseek-flash"
+      },
+      "vision_provider_id": {
+        "description": "识图模型提供商（备选，仅未填直连 Key 时使用）",
+        "hint": "未填写上方“识图模型 API Key”时，从 AstrBot 已配置的提供商中选择支持图片输入的模型；留空则使用文本模型提供商。",
+        "type": "string",
+        "default": "",
+        "_special": "select_provider"
+      },
+      "max_frames_per_video": {
+        "description": "单视频抽帧上限（帧）",
+        "hint": "每 9 帧拼合为一张 3×3 分镜图后提交识图模型。需要 ffmpeg；未安装时降级为仅读文字。",
+        "type": "int",
+        "default": 18
+      },
+      "max_images_per_night": {
+        "description": "每晚分镜图上限（张）",
+        "hint": "单晚提交识图模型的分镜图总数上限。",
+        "type": "int",
+        "default": 8
+      },
+      "max_tokens_per_night": {
+        "description": "每晚 Token 预算",
+        "hint": "文本与识图合计（文本部分为估算）。达到后停止深看，仅用已有素材写日记；0 表示不限制。",
+        "type": "int",
+        "default": 100000
+      }
+    }
+  },
+  "targets_share_section": {
+    "description": "目标对话与分享",
+    "hint": "配置私信/群聊接收对象、各对话独立人格与记忆策略，以及每日分享与免打扰时段。",
+    "type": "object",
+    "collapsed": false,
+    "items": {
+      "targets": {
+        "description": "多组对话与人格/记忆配置（推荐）",
+        "hint": "可添加多组目标对话，每组可独立指定接收会话（QQ 私聊或 UMO）、专属人格及 LivingMemory 接口。留空时沿用下方的“主人用户 ID / 主人会话标识”和全局 LivingMemory 设置。",
+        "type": "template_list",
+        "default": [],
+        "templates": {
+          "target_profile": {
+            "name": "目标对话组",
+            "hint": "为一个私聊或群聊会话配置独立的人格与 LivingMemory 记忆参数。",
+            "items": {
+              "enabled": {
+                "description": "启用该组",
+                "type": "bool",
+                "default": true
+              },
+              "name": {
+                "description": "备注名称（可选）",
+                "hint": "便于在状态与日志中区分，例如“主号私聊”“测试群”。",
+                "type": "string",
+                "default": ""
+              },
+              "owner_qq": {
+                "description": "目标用户 ID（如 QQ 号 / 微信 ID，自动识别私聊）",
+                "hint": "填写后，该用户首次私聊机器人时会自动记录其会话标识。若下方已填会话标识（UMO），则以 UMO 为准。",
+                "type": "string",
+                "default": ""
+              },
+              "owner_umo": {
+                "description": "目标会话标识 UMO（可选）",
+                "hint": "形如 平台ID:FriendMessage:用户ID 或 平台ID:GroupMessage:群ID（支持 QQ、微信等）。留空则在目标用户首次私聊时自动记录。",
+                "type": "string",
+                "default": ""
+              },
+              "persona_id": {
+                "description": "该对话使用的人格（可选）",
+                "hint": "填写 AstrBot 中已配置的人格名称；留空则自动读取该会话当前使用的人格。",
+                "type": "string",
+                "default": ""
+              },
+              "livingmemory_mode": {
+                "description": "LivingMemory 写入策略",
+                "hint": "跟随全局：使用下方全局 LivingMemory 开关；开启/关闭：仅针对该组单独开关。",
+                "type": "string",
+                "default": "inherit",
+                "options": ["inherit", "on", "off"],
+                "labels": ["跟随全局", "开启", "关闭"]
+              },
+              "livingmemory_url": {
+                "description": "LivingMemory 接口地址（可选）",
+                "hint": "留空则继承下方全局 LivingMemory 外部接口地址。",
+                "type": "string",
+                "default": ""
+              },
+              "livingmemory_api_key": {
+                "description": "LivingMemory API 密钥（可选）",
+                "hint": "留空则继承下方全局 LivingMemory API 密钥。",
+                "type": "string",
+                "default": "",
+                "secret": true
+              },
+              "livingmemory_persona_id": {
+                "description": "记忆所属人格 ID（可选）",
+                "hint": "留空时在 /bili lm connect 自动匹配，或默认使用上方所选人格。",
+                "type": "string",
+                "default": ""
+              },
+              "livingmemory_scope": {
+                "description": "记忆所属会话范围（可选）",
+                "hint": "留空时自动匹配为该组目标会话的 UMO，确保在该对话中能正常召回。",
+                "type": "string",
+                "default": ""
+              }
+            }
+          }
+        }
+      },
+      "owner_qq": {
+        "description": "主人用户 ID（如 QQ 号 / 微信 ID，兼容单对话设置）",
+        "hint": "未配置上方“多组对话”时作为默认私信接收人；若同时配置了多组对话，此项也会作为默认组保留。",
+        "type": "string",
+        "default": ""
+      },
+      "owner_umo": {
+        "description": "主人会话标识（兼容单对话设置，可选）",
+        "hint": "默认私聊的 unified_msg_origin。留空则在主人首次私聊时自动记录。",
+        "type": "string",
+        "default": ""
+      },
+      "max_share_per_day": {
+        "description": "每日分享上限（条）",
+        "hint": "每个目标对话每天最多收到的视频分享条数，设为 0 则不分享。",
+        "type": "int",
+        "default": 1
+      },
+      "quiet_hours": {
+        "description": "免打扰时段",
+        "hint": "格式 HH:MM-HH:MM。该时段内不发送私信，分享内容顺延至时段结束后发送。",
+        "type": "string",
+        "default": "23:00-09:00"
+      }
+    }
+  },
+  "browse_diary_section": {
+    "description": "浏览偏好与日记",
+    "hint": "设置兴趣与排除关键词、每轮粗看/深看数量、字幕长度与日记上下文。",
+    "type": "object",
+    "collapsed": true,
+    "items": {
+      "interests": {
+        "description": "兴趣关键词",
+        "hint": "用于搜索选题，每次随机取若干个。",
+        "type": "list",
+        "default": ["科普", "纪录片", "猫", "音乐", "手工"]
+      },
+      "avoid": {
+        "description": "排除关键词",
+        "hint": "标题或简介包含这些词的视频不会被选为候选。",
+        "type": "list",
+        "default": []
+      },
+      "candidates_per_round": {
+        "description": "每轮候选视频数",
+        "hint": "每次唤醒进入“粗看”的视频数量（读取简介、字幕片段与热评并打分）。",
+        "type": "int",
+        "default": 5
+      },
+      "deep_watch_per_round": {
+        "description": "每轮深看视频数",
+        "hint": "粗看得分较高的前 N 个视频进入深看（完整字幕、热评、画面）。",
+        "type": "int",
+        "default": 2
+      },
+      "subtitle_max_chars": {
+        "description": "字幕截取上限（字）",
+        "hint": "深看与聊天工具读取字幕时的最大字数。",
+        "type": "int",
+        "default": 4000
+      },
+      "diary_context_count": {
+        "description": "写日记时参考的历史篇数",
+        "hint": "用于保持前后连贯，设为 0 则不参考。",
+        "type": "int",
+        "default": 3
+      }
+    }
+  },
+  "schedule_section": {
+    "description": "作息与低价时段调度",
+    "hint": "设置每日随机唤醒时间窗、时区以及 DeepSeek 低价时段避峰策略。",
+    "type": "object",
+    "collapsed": true,
+    "items": {
+      "schedule_windows": {
+        "description": "作息时间窗",
+        "hint": "格式 HH:MM-HH:MM，可配置多个，支持跨午夜（如 23:00-01:00）。时间按下方“时区”解释。",
+        "type": "list",
+        "default": ["21:00-23:00"]
+      },
+      "wakes_per_window": {
+        "description": "每个时间窗每日唤醒次数",
+        "hint": "唤醒时刻在窗口内随机选取，避开整点与半点。",
+        "type": "int",
+        "default": 1
+      },
+      "skip_probability": {
+        "description": "单次唤醒的跳过概率",
+        "hint": "取值 0–1。用于让作息不那么规律。",
+        "type": "float",
+        "default": 0.1
+      },
+      "timezone": {
+        "description": "时区",
+        "hint": "IANA 时区名，如 Europe/London、Asia/Shanghai。",
+        "type": "string",
+        "default": "Europe/London"
+      },
+      "offpeak_mode": {
+        "description": "低价时段调度",
+        "hint": "自动：仅当使用 DeepSeek 时，按其低价时段运行——高价时段为北京时间工作日 9:00–12:00 与 14:00–18:00，其余（含周末与法定节假日）为低价；计划时刻避开高价，到点撞上则顺延，流程中途进入高价则停止后续深看。使用其他模型时自动不生效。关闭：不做任何时段限制。",
+        "type": "string",
+        "default": "auto",
+        "options": ["auto", "off"],
+        "labels": ["自动（仅 DeepSeek 生效）", "关闭"]
+      },
+      "peak_holidays": {
+        "description": "法定节假日（按低价计）",
+        "hint": "仅在低价时段调度生效时使用。日期格式 YYYY-MM-DD；官方这些日期全天为低价，插件不内置节假日表，请按需填写。",
+        "type": "list",
+        "default": []
+      }
+    }
+  },
+  "livingmemory_section": {
+    "description": "LivingMemory 长期记忆（可选）",
+    "hint": "将深看过的视频写入 LivingMemory 长期记忆，建议通过 /bili lm connect 一键连接。",
+    "type": "object",
+    "collapsed": true,
+    "items": {
+      "livingmemory_enabled": {
+        "description": "写入 LivingMemory（全局默认）",
+        "hint": "开启后，每个深看的视频写入一条长期记忆。建议通过 /bili lm connect 一键连接并自动启用。",
+        "type": "bool",
+        "default": false
+      },
+      "livingmemory_auto_connect": {
+        "description": "启动时自动连接 LivingMemory",
+        "hint": "已填写 API 密钥时，插件启动后自动检测接口、选择人格与会话范围并启用写入；已手动填写的人格与会话范围不会被覆盖。也可随时发送 /bili lm connect。",
+        "type": "bool",
+        "default": true
+      },
+      "livingmemory_url": {
+        "description": "LivingMemory 外部接口地址（全局默认）",
+        "hint": "需在 LivingMemory 中启用“外部记忆 API”（版本 ≥ 2.11.0），默认监听 http://127.0.0.1:7801。",
+        "type": "string",
+        "default": "http://127.0.0.1:7801"
+      },
+      "livingmemory_api_key": {
+        "description": "LivingMemory API 密钥（全局默认）",
+        "hint": "通过 /lmem apikey create <名称> write 生成，需要写权限。令牌仅显示一次。",
+        "type": "string",
+        "default": "",
+        "secret": true
+      },
+      "livingmemory_persona_id": {
+        "description": "记忆所属人格 ID（全局默认）",
+        "hint": "对应私聊所用人格的名称，召回时按此精确匹配。留空时由 /bili lm connect 自动填写。",
+        "type": "string",
+        "default": ""
+      },
+      "livingmemory_scope": {
+        "description": "记忆所属会话范围（全局默认）",
+        "hint": "对应主人私聊会话（形如 平台ID:FriendMessage:QQ号）。留空时由 /bili lm connect 自动填写；若为空，记忆将写入全局范围，私聊无法召回。",
+        "type": "string",
+        "default": ""
+      }
+    }
+  },
   "sessdata": {
-    "description": "Bilibili SESSDATA",
-    "hint": "登录态 Cookie，用于读取字幕与评论。建议使用小号。该值仅保存在本配置中，不会写入日志、日记、记忆或私信。",
+    "description": "Bilibili SESSDATA（旧版兼容）",
     "type": "string",
     "default": "",
-    "secret": true
+    "secret": true,
+    "invisible": true
   },
   "buvid3": {
-    "description": "Bilibili buvid3（可选）",
-    "hint": "浏览器 Cookie 中的 buvid3。留空时插件自动获取；手动填写可降低 HTTP 412 风控概率。",
+    "description": "Bilibili buvid3（旧版兼容）",
     "type": "string",
-    "default": ""
+    "default": "",
+    "invisible": true
   },
   "request_interval_seconds": {
-    "description": "Bilibili 请求间隔（秒）",
-    "hint": "格式为“最小-最大”，每次请求前随机等待。例如 2-4；遇到风控时建议调大，如 4-8。",
+    "description": "Bilibili 请求间隔（旧版兼容）",
     "type": "string",
-    "default": "2-4"
+    "default": "2-4",
+    "invisible": true
   },
   "targets": {
-    "description": "多组对话与人格/记忆配置（推荐）",
-    "hint": "可添加多组目标对话，每组可独立指定接收会话（QQ 私聊或 UMO）、专属人格及 LivingMemory 接口。留空时沿用下方的“主人 QQ 号 / 主人会话标识”和全局 LivingMemory 设置。",
+    "description": "多组对话配置（旧版兼容）",
     "type": "template_list",
     "default": [],
+    "invisible": true,
     "templates": {
       "target_profile": {
         "name": "目标对话组",
-        "hint": "为一个私聊或群聊会话配置独立的人格与 LivingMemory 记忆参数。",
         "items": {
-          "enabled": {
-            "description": "启用该组",
-            "type": "bool",
-            "default": true
-          },
-          "name": {
-            "description": "备注名称（可选）",
-            "hint": "便于在状态与日志中区分，例如“主号私聊”“测试群”。",
-            "type": "string",
-            "default": ""
-          },
-          "owner_qq": {
-            "description": "目标用户 ID（如 QQ 号 / 微信 ID，自动识别私聊）",
-            "hint": "填写后，该用户首次私聊机器人时会自动记录其会话标识。若下方已填会话标识（UMO），则以 UMO 为准。",
-            "type": "string",
-            "default": ""
-          },
-          "owner_umo": {
-            "description": "目标会话标识 UMO（可选）",
-            "hint": "形如 平台ID:FriendMessage:用户ID 或 平台ID:GroupMessage:群ID（支持 QQ、微信等）。留空则在目标用户首次私聊时自动记录。",
-            "type": "string",
-            "default": ""
-          },
-          "persona_id": {
-            "description": "该对话使用的人格（可选）",
-            "hint": "填写 AstrBot 中已配置的人格名称；留空则自动读取该会话当前使用的人格。",
-            "type": "string",
-            "default": ""
-          },
-          "livingmemory_mode": {
-            "description": "LivingMemory 写入策略",
-            "hint": "跟随全局：使用下方全局 LivingMemory 开关；开启/关闭：仅针对该组单独开关。",
-            "type": "string",
-            "default": "inherit",
-            "options": ["inherit", "on", "off"],
-            "labels": ["跟随全局", "开启", "关闭"]
-          },
-          "livingmemory_url": {
-            "description": "LivingMemory 接口地址（可选）",
-            "hint": "留空则继承下方全局 LivingMemory 外部接口地址。",
-            "type": "string",
-            "default": ""
-          },
-          "livingmemory_api_key": {
-            "description": "LivingMemory API 密钥（可选）",
-            "hint": "留空则继承下方全局 LivingMemory API 密钥。",
-            "type": "string",
-            "default": "",
-            "secret": true
-          },
-          "livingmemory_persona_id": {
-            "description": "记忆所属人格 ID（可选）",
-            "hint": "留空时在 /bili lm connect 自动匹配，或默认使用上方所选人格。",
-            "type": "string",
-            "default": ""
-          },
-          "livingmemory_scope": {
-            "description": "记忆所属会话范围（可选）",
-            "hint": "留空时自动匹配为该组目标会话的 UMO，确保在该对话中能正常召回。",
-            "type": "string",
-            "default": ""
-          }
+          "enabled": {"description": "启用该组", "type": "bool", "default": true},
+          "name": {"description": "备注名称", "type": "string", "default": ""},
+          "owner_qq": {"description": "目标用户 ID", "type": "string", "default": ""},
+          "owner_umo": {"description": "目标会话标识 UMO", "type": "string", "default": ""},
+          "persona_id": {"description": "该对话使用的人格", "type": "string", "default": ""},
+          "livingmemory_mode": {"description": "LivingMemory 写入策略", "type": "string", "default": "inherit"},
+          "livingmemory_url": {"description": "LivingMemory 接口地址", "type": "string", "default": ""},
+          "livingmemory_api_key": {"description": "LivingMemory API 密钥", "type": "string", "default": "", "secret": true},
+          "livingmemory_persona_id": {"description": "记忆所属人格 ID", "type": "string", "default": ""},
+          "livingmemory_scope": {"description": "记忆所属会话范围", "type": "string", "default": ""}
         }
       }
     }
   },
   "owner_qq": {
-    "description": "主人用户 ID（如 QQ 号 / 微信 ID，兼容单对话设置）",
-    "hint": "未配置上方“多组对话”时作为默认私信接收人；若同时配置了多组对话，此项也会作为默认组保留。",
+    "description": "主人用户 ID（旧版兼容）",
     "type": "string",
-    "default": ""
+    "default": "",
+    "invisible": true
   },
   "owner_umo": {
-    "description": "主人会话标识（兼容单对话设置，可选）",
-    "hint": "默认私聊的 unified_msg_origin。留空则在主人首次私聊时自动记录。",
+    "description": "主人会话标识（旧版兼容）",
     "type": "string",
-    "default": ""
+    "default": "",
+    "invisible": true
   },
   "chat_provider_id": {
-    "description": "文本模型提供商",
-    "hint": "用于打分、总结与写日记。留空则使用目标会话当前的聊天提供商。",
+    "description": "文本模型提供商（旧版兼容）",
     "type": "string",
     "default": "",
-    "_special": "select_provider"
+    "invisible": true
   },
   "vision_api_key": {
-    "description": "识图模型 API Key（直连，推荐）",
-    "hint": "直接填写 DeepSeek 或其他 OpenAI 兼容视觉接口的 API Key。填写后优先走直连，不依赖 AstrBot 内置提供商的识图支持。",
+    "description": "识图模型 API Key（旧版兼容）",
     "type": "string",
     "default": "",
-    "secret": true
+    "secret": true,
+    "invisible": true
   },
   "vision_api_base": {
-    "description": "识图模型 API 地址（直连）",
-    "hint": "OpenAI 兼容接口地址，DeepSeek 官方为 https://api.deepseek.com/v1。",
+    "description": "识图模型 API 地址（旧版兼容）",
     "type": "string",
-    "default": "https://api.deepseek.com/v1"
+    "default": "https://api.deepseek.com/v1",
+    "invisible": true
   },
   "vision_model": {
-    "description": "识图模型名称（直连）",
-    "hint": "直连时使用的模型名，例如 deepseek-flash（需支持图片输入）。",
+    "description": "识图模型名称（旧版兼容）",
     "type": "string",
-    "default": "deepseek-flash"
+    "default": "deepseek-flash",
+    "invisible": true
   },
   "vision_provider_id": {
-    "description": "识图模型提供商（备选，仅未填直连 Key 时使用）",
-    "hint": "未填写上方“识图模型 API Key”时，从 AstrBot 已配置的提供商中选择支持图片输入的模型；留空则使用文本模型提供商。",
+    "description": "识图模型提供商（旧版兼容）",
     "type": "string",
     "default": "",
-    "_special": "select_provider"
+    "invisible": true
   },
   "vision_mode": {
-    "description": "画面理解策略",
-    "hint": "始终：深看时都读取画面；自动：仅在无字幕或字幕过短时读取；关闭：不读取画面。",
+    "description": "画面理解策略（旧版兼容）",
     "type": "string",
     "default": "always",
-    "options": ["always", "auto", "never"],
-    "labels": ["始终", "自动", "关闭"]
+    "invisible": true
   },
   "max_frames_per_video": {
-    "description": "单视频抽帧上限（帧）",
-    "hint": "每 9 帧拼合为一张 3×3 分镜图后提交识图模型。需要 ffmpeg；未安装时降级为仅读文字。",
+    "description": "单视频抽帧上限（旧版兼容）",
     "type": "int",
-    "default": 18
+    "default": 18,
+    "invisible": true
   },
   "max_images_per_night": {
-    "description": "每晚分镜图上限（张）",
-    "hint": "单晚提交识图模型的分镜图总数上限。",
+    "description": "每晚分镜图上限（旧版兼容）",
     "type": "int",
-    "default": 8
+    "default": 8,
+    "invisible": true
   },
   "max_tokens_per_night": {
-    "description": "每晚 Token 预算",
-    "hint": "文本与识图合计（文本部分为估算）。达到后停止深看，仅用已有素材写日记；0 表示不限制。",
+    "description": "每晚 Token 预算（旧版兼容）",
     "type": "int",
-    "default": 100000
+    "default": 100000,
+    "invisible": true
   },
   "livingmemory_enabled": {
-    "description": "写入 LivingMemory（全局默认）",
-    "hint": "开启后，每个深看的视频写入一条长期记忆。建议通过 /bili lm connect 一键连接并自动启用。",
+    "description": "写入 LivingMemory（旧版兼容）",
     "type": "bool",
-    "default": false
+    "default": false,
+    "invisible": true
   },
   "livingmemory_auto_connect": {
-    "description": "启动时自动连接 LivingMemory",
-    "hint": "已填写 API 密钥时，插件启动后自动检测接口、选择人格与会话范围并启用写入；已手动填写的人格与会话范围不会被覆盖。也可随时发送 /bili lm connect。",
+    "description": "启动时自动连接 LivingMemory（旧版兼容）",
     "type": "bool",
-    "default": true
+    "default": true,
+    "invisible": true
   },
   "livingmemory_url": {
-    "description": "LivingMemory 外部接口地址（全局默认）",
-    "hint": "需在 LivingMemory 中启用“外部记忆 API”（版本 ≥ 2.11.0），默认监听 http://127.0.0.1:7801。",
+    "description": "LivingMemory 外部接口地址（旧版兼容）",
     "type": "string",
-    "default": "http://127.0.0.1:7801"
+    "default": "http://127.0.0.1:7801",
+    "invisible": true
   },
   "livingmemory_api_key": {
-    "description": "LivingMemory API 密钥（全局默认）",
-    "hint": "通过 /lmem apikey create <名称> write 生成，需要写权限。令牌仅显示一次。",
+    "description": "LivingMemory API 密钥（旧版兼容）",
     "type": "string",
     "default": "",
-    "secret": true
+    "secret": true,
+    "invisible": true
   },
   "livingmemory_persona_id": {
-    "description": "记忆所属人格 ID（全局默认）",
-    "hint": "对应私聊所用人格的名称，召回时按此精确匹配。留空时由 /bili lm connect 自动填写。",
+    "description": "记忆所属人格 ID（旧版兼容）",
     "type": "string",
-    "default": ""
+    "default": "",
+    "invisible": true
   },
   "livingmemory_scope": {
-    "description": "记忆所属会话范围（全局默认）",
-    "hint": "对应主人私聊会话（形如 平台ID:FriendMessage:QQ号）。留空时由 /bili lm connect 自动填写；若为空，记忆将写入全局范围，私聊无法召回。",
+    "description": "记忆所属会话范围（旧版兼容）",
     "type": "string",
-    "default": ""
+    "default": "",
+    "invisible": true
   },
   "schedule_windows": {
-    "description": "作息时间窗",
-    "hint": "格式 HH:MM-HH:MM，可配置多个，支持跨午夜（如 23:00-01:00）。时间按下方“时区”解释。",
+    "description": "作息时间窗（旧版兼容）",
     "type": "list",
-    "default": ["21:00-23:00"]
+    "default": ["21:00-23:00"],
+    "invisible": true
   },
   "wakes_per_window": {
-    "description": "每个时间窗每日唤醒次数",
-    "hint": "唤醒时刻在窗口内随机选取，避开整点与半点。",
+    "description": "每个时间窗每日唤醒次数（旧版兼容）",
     "type": "int",
-    "default": 1
+    "default": 1,
+    "invisible": true
   },
   "skip_probability": {
-    "description": "单次唤醒的跳过概率",
-    "hint": "取值 0–1。用于让作息不那么规律。",
+    "description": "单次唤醒的跳过概率（旧版兼容）",
     "type": "float",
-    "default": 0.1
+    "default": 0.1,
+    "invisible": true
   },
   "timezone": {
-    "description": "时区",
-    "hint": "IANA 时区名，如 Europe/London、Asia/Shanghai。",
+    "description": "时区（旧版兼容）",
     "type": "string",
-    "default": "Europe/London"
+    "default": "Europe/London",
+    "invisible": true
   },
   "offpeak_mode": {
-    "description": "低价时段调度",
-    "hint": "自动：仅当使用 DeepSeek 时，按其低价时段运行——高价时段为北京时间工作日 9:00–12:00 与 14:00–18:00，其余（含周末与法定节假日）为低价；计划时刻避开高价，到点撞上则顺延，流程中途进入高价则停止后续深看。使用其他模型时自动不生效。关闭：不做任何时段限制。",
+    "description": "低价时段调度（旧版兼容）",
     "type": "string",
     "default": "auto",
-    "options": ["auto", "off"],
-    "labels": ["自动（仅 DeepSeek 生效）", "关闭"]
+    "invisible": true
   },
   "peak_holidays": {
-    "description": "法定节假日（按低价计）",
-    "hint": "仅在低价时段调度生效时使用。日期格式 YYYY-MM-DD；官方这些日期全天为低价，插件不内置节假日表，请按需填写。",
+    "description": "法定节假日（旧版兼容）",
     "type": "list",
-    "default": []
+    "default": [],
+    "invisible": true
   },
   "quiet_hours": {
-    "description": "免打扰时段",
-    "hint": "格式 HH:MM-HH:MM。该时段内不发送私信，分享内容顺延至时段结束后发送。",
+    "description": "免打扰时段（旧版兼容）",
     "type": "string",
-    "default": "23:00-09:00"
+    "default": "23:00-09:00",
+    "invisible": true
   },
   "interests": {
-    "description": "兴趣关键词",
-    "hint": "用于搜索选题，每次随机取若干个。",
+    "description": "兴趣关键词（旧版兼容）",
     "type": "list",
-    "default": ["科普", "纪录片", "猫", "音乐", "手工"]
+    "default": ["科普", "纪录片", "猫", "音乐", "手工"],
+    "invisible": true
   },
   "avoid": {
-    "description": "排除关键词",
-    "hint": "标题或简介包含这些词的视频不会被选为候选。",
+    "description": "排除关键词（旧版兼容）",
     "type": "list",
-    "default": []
+    "default": [],
+    "invisible": true
   },
   "candidates_per_round": {
-    "description": "每轮候选视频数",
-    "hint": "每次唤醒进入“粗看”的视频数量（读取简介、字幕片段与热评并打分）。",
+    "description": "每轮候选视频数（旧版兼容）",
     "type": "int",
-    "default": 5
+    "default": 5,
+    "invisible": true
   },
   "deep_watch_per_round": {
-    "description": "每轮深看视频数",
-    "hint": "粗看得分较高的前 N 个视频进入深看（完整字幕、热评、画面）。",
+    "description": "每轮深看视频数（旧版兼容）",
     "type": "int",
-    "default": 2
+    "default": 2,
+    "invisible": true
   },
   "subtitle_max_chars": {
-    "description": "字幕截取上限（字）",
-    "hint": "深看与聊天工具读取字幕时的最大字数。",
+    "description": "字幕截取上限（旧版兼容）",
     "type": "int",
-    "default": 4000
+    "default": 4000,
+    "invisible": true
   },
   "diary_context_count": {
-    "description": "写日记时参考的历史篇数",
-    "hint": "用于保持前后连贯，设为 0 则不参考。",
+    "description": "写日记时参考的历史篇数（旧版兼容）",
     "type": "int",
-    "default": 3
+    "default": 3,
+    "invisible": true
   },
   "max_share_per_day": {
-    "description": "每日分享上限（条）",
-    "hint": "每个目标对话每天最多收到的视频分享条数，设为 0 则不分享。",
+    "description": "每日分享上限（旧版兼容）",
     "type": "int",
-    "default": 1
+    "default": 1,
+    "invisible": true
   }
 }

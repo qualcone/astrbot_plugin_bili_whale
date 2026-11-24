@@ -19,7 +19,7 @@ from . import diary as diary_mod
 from . import frames as fr
 from .bili_client import (BiliClient, BiliError, BiliRisk, fmt_comments, fmt_info, parse_bvid,
                           fmt_video_line, redact)
-from .config import parse_settings
+from .config import migrate_legacy_config, parse_settings
 from .livingmemory import LMClient, choose_target
 from .pipeline import Pipeline
 from .scheduler import (due_wake, ensure_plan, get_tz, is_peak, looks_like_deepseek, mark_done,
@@ -38,6 +38,12 @@ class BiliWhale(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.raw_config = config
+        if migrate_legacy_config(config):
+            try:
+                config.save_config()
+                logger.info("[bili_whale] 已自动将旧版配置无损迁移到新版分组菜单")
+            except Exception as e:
+                logger.warning(f"[bili_whale] 迁移配置保存失败: {type(e).__name__}")
         self.cfg = parse_settings(config)
         self.tz = get_tz(self.cfg.timezone)
         self.data_dir = self._data_dir()
@@ -238,7 +244,10 @@ class BiliWhale(Star):
             return ["❌ 未配置 livingmemory_api_key：先在 LivingMemory 打开 external_api 并用 "
                     "/lmem apikey 生成写权限密钥，填进插件配置后再试"]
         lines: list[str] = []
-        raw_targets = self.raw_config.get("targets")
+        targets_sec = self.raw_config.get("targets_share_section")
+        raw_targets = targets_sec.get("targets") if isinstance(targets_sec, dict) else self.raw_config.get("targets")
+        lm_sec = self.raw_config.get("livingmemory_section")
+        lm_dest = lm_sec if isinstance(lm_sec, dict) else self.raw_config
         changed = False
         for t in targets:
             if t.lm_mode == "off":
@@ -271,7 +280,7 @@ class BiliWhale(Star):
                 if not c.lm_scope and picked["scope"]:
                     changes["livingmemory_scope"] = picked["scope"]
                 for k, v in changes.items():
-                    self.raw_config[k] = v
+                    lm_dest[k] = v
                 c.lm_enabled = True
                 c.lm_persona_id = changes.get("livingmemory_persona_id", c.lm_persona_id)
                 c.lm_scope = changes.get("livingmemory_scope", c.lm_scope)
@@ -294,7 +303,7 @@ class BiliWhale(Star):
                                 t.lm_scope = picked["scope"]
                                 changed = True
                 if not c.lm_enabled and t.lm_mode == "inherit":
-                    self.raw_config["livingmemory_enabled"] = True
+                    lm_dest["livingmemory_enabled"] = True
                     c.lm_enabled = True
                     changed = True
                 lines.append(
@@ -309,6 +318,32 @@ class BiliWhale(Star):
         lines.append("✅ 已完成 LivingMemory 连接。下次醒来（或 /bili wake）后，用 /lmem search 看是否多了记忆")
         return lines
 
+    async def _record_share_history(self, umo: str, text: str) -> None:
+        """将主动分享的消息写入 AstrBot 对话历史，确保用户回复时 AI 能接上上下文。"""
+        cm = getattr(self.context, "conversation_manager", None)
+        if cm is None:
+            return
+        try:
+            cid = await cm.get_curr_conversation_id(umo)
+            if not cid:
+                cid = await cm.new_conversation(umo)
+            if not cid:
+                return
+            user_msg = {
+                "role": "user",
+                "content": "[系统提示：你刚在 B 站看了一个视频，并主动给对方发送了下面这条分享消息。对方接下来的回复可能与此视频有关。]",
+            }
+            asst_msg = {"role": "assistant", "content": text}
+            if hasattr(cm, "add_message_pair"):
+                await cm.add_message_pair(cid=cid, user_message=user_msg, assistant_message=asst_msg)
+            else:
+                conv = await cm.get_conversation(umo, cid)
+                hist = list(getattr(conv, "content", None) or [])
+                hist.extend([user_msg, asst_msg])
+                await cm.update_conversation(umo, cid, history=hist)
+        except Exception as e:
+            logger.warning(f"[bili_whale] 写入分享聊天记录失败: {type(e).__name__}: {e}")
+
     async def _send_dm(self, text: str, target=None) -> bool:
         umo = self._umo(target)
         if not umo:
@@ -316,6 +351,7 @@ class BiliWhale(Star):
             logger.warning(f"[bili_whale] 没有目标会话 umo{f' ({name})' if name else ''}：请配置 owner_umo，或让目标先私聊机器人一次")
             return False
         await self.context.send_message(umo, MessageChain().message(text))
+        await self._record_share_history(umo, text)
         return True
 
     # ---------- 后台循环 ----------

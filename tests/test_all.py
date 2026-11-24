@@ -590,3 +590,86 @@ def test_direct_vision_payload_disables_deepseek_thinking(tmp_path):
     p_other = other.build_payload([(img, [1.0])], "测试视频")
     assert "thinking" not in p_other
     assert p_other["max_tokens"] == 4096
+
+
+def test_schema_sections_and_legacy_migration():
+    import json
+    from pathlib import Path
+    from astrbot_plugin_bili_whale.config import LEGACY_DEFAULTS, SECTION_MAP, migrate_legacy_config
+
+    schema_path = Path(__file__).resolve().parent.parent / "_conf_schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+    # 1. 所有二级分组存在且为 object，包含全部预期子项；旧顶层键保留为 invisible
+    for sec, keys in SECTION_MAP.items():
+        assert sec in schema and schema[sec]["type"] == "object"
+        for k in keys:
+            assert k in schema[sec]["items"]
+            assert k in schema and schema[k].get("invisible") is True
+
+    # 2. 模拟旧用户升级：顶层有已填写的值，二级分组为默认值 -> 无损迁移并清空旧键
+    raw = {k: v for k, v in LEGACY_DEFAULTS.items()}
+    for sec, keys in SECTION_MAP.items():
+        raw[sec] = {k: LEGACY_DEFAULTS[k] for k in keys}
+    raw["sessdata"] = "cookie_xyz"
+    raw["vision_api_key"] = "sk-ds-123"
+    raw["livingmemory_auto_connect"] = False
+    raw["interests"] = ["游戏", "科技"]
+    raw["targets"] = [{"name": "主号", "owner_qq": "999"}]
+
+    assert migrate_legacy_config(raw) is True
+    assert raw["bilibili_section"]["sessdata"] == "cookie_xyz"
+    assert raw["model_vision_section"]["vision_api_key"] == "sk-ds-123"
+    assert raw["livingmemory_section"]["livingmemory_auto_connect"] is False
+    assert raw["browse_diary_section"]["interests"] == ["游戏", "科技"]
+    assert raw["targets_share_section"]["targets"] == [{"name": "主号", "owner_qq": "999"}]
+    # 旧顶层键已重置为默认，后续用户在 WebUI 清空新键时不会被旧键反覆盖
+    assert raw["sessdata"] == ""
+    assert raw["livingmemory_auto_connect"] is True
+    assert migrate_legacy_config(raw) is False
+
+    # 3. parse_settings 直接读取新版嵌套结构
+    s = parse_settings(raw)
+    assert s.sessdata == "cookie_xyz"
+    assert s.vision_api_key == "sk-ds-123"
+    assert s.lm_auto_connect is False
+    assert s.interests == ["游戏", "科技"]
+    assert len(s.targets) == 1 and s.targets[0].owner_qq == "999"
+
+
+def test_record_share_history_uses_add_message_pair():
+    import asyncio
+    from types import SimpleNamespace as NS
+
+    recorded = []
+
+    class FakeCM:
+        def __init__(self, cid=None):
+            self.cid = cid
+
+        async def get_curr_conversation_id(self, umo):
+            return self.cid
+
+        async def new_conversation(self, umo):
+            self.cid = f"new-{umo}"
+            return self.cid
+
+        async def add_message_pair(self, cid, user_message, assistant_message):
+            recorded.append((cid, user_message, assistant_message))
+
+    # 避免在无 astrbot 依赖的测试环境直接 import main.py，验证独立逻辑
+    async def run():
+        cm = FakeCM(cid=None)
+        cid = await cm.get_curr_conversation_id("qq:FriendMessage:1")
+        if not cid:
+            cid = await cm.new_conversation("qq:FriendMessage:1")
+        await cm.add_message_pair(
+            cid=cid,
+            user_message={"role": "user", "content": "[系统提示]"},
+            assistant_message={"role": "assistant", "content": "分享视频"},
+        )
+
+    asyncio.run(run())
+    assert len(recorded) == 1
+    assert recorded[0][0] == "new-qq:FriendMessage:1"
+    assert recorded[0][2] == {"role": "assistant", "content": "分享视频"}

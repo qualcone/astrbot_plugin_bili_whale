@@ -1,15 +1,23 @@
 # Changelog
 
+## [0.4.1] - 2026-11-24
+
+### 修复
+- **主动分享写入对话历史**：发送视频分享私信后，自动通过 AstrBot `conversation_manager.add_message_pair` 将分享内容写入目标会话聊天记录，用户直接回复时 AI 能自然衔接上下文。
+- **DeepSeek 识图返回空内容**：直连 DeepSeek 视觉接口（如 `deepseek-flash`）时显式关闭思考模式（`thinking: disabled`）并将 `max_tokens` 提高到 `4096`，避免思考 token 耗尽输出预算导致 `content` 为空；同时增强空内容报错诊断信息。
+
+### 优化
+- **配置菜单二级分组与逻辑重排**：将配置页重构为 6 个可折叠二级菜单（B 站账号与请求 → 文本与识图模型 → 目标对话与分享 → 浏览偏好与日记 → 作息与低价时段调度 → LivingMemory 长期记忆），启动时自动将旧版平铺配置无损迁移到新分组，原有配置不丢失。
+
 ## [0.4.0] - 2026-11-24
 
 ### 新增
 - **多组对话配置（`targets`）**：支持配置多组目标对话（私聊或群聊），每组可独立指定目标会话（`owner_qq` / `owner_umo`）、专属人格（`persona_id`）以及独立的 LivingMemory 接口与写入策略（`livingmemory_mode`、`livingmemory_url`、`livingmemory_api_key`、`livingmemory_persona_id`、`livingmemory_scope`）。
 - **AI 主动看视频工具 `bili_watch`**：在聊天中直接发给 AI 视频 BV 号、`bilibili.com` 链接或 `b23.tv` 短链时，AI 可主动调用该工具完整读取视频信息、字幕、热评并抽帧看画面。
-- **识图模型支持直连 API（DeepSeek / OpenAI 兼容）**：新增 `vision_api_key`、`vision_api_base`、`vision_model`，填写后直接通过 OpenAI 兼容 `image_url` 接口调用（如 DeepSeek `deepseek-flash`）并统计真实 token 用量，不再受限于 AstrBot 内置提供商是否支持识图；留空时仍兼容原有 `vision_provider_id`（DeepSeek 直连默认关闭思考模式 `thinking: disabled` 并将 `max_tokens` 设为 4096，避免推理耗尽输出返回空内容）。
+- **识图模型支持直连 API（DeepSeek / OpenAI 兼容）**：新增 `vision_api_key`、`vision_api_base`、`vision_model`，填写后直接通过 OpenAI 兼容 `image_url` 接口调用（如 DeepSeek `deepseek-flash`）并统计真实 token 用量，不再受限于 AstrBot 内置提供商是否支持识图；留空时仍兼容原有 `vision_provider_id`。
 - `/bili status` 与 `/bili lm status` 支持展示多组目标会话及 LivingMemory 连接状态；`/bili lm connect` 支持一次性为多组自动匹配并回填 `persona_id` 与 `scope`。
 
 ### 优化
-- 优化配置菜单顺序：B 站账号与请求 → 多组对话配置与兼容单对话配置 → 模型与视觉预算 → LivingMemory 全局默认配置 → 作息与免打扰 → 兴趣与分享限制。
 - 兼容多平台（含微信、QQ 等）：将配置说明与分享提示词从“QQ 私信”调整为通用私信描述，兼容各类 AstrBot 平台用户 ID 与会话 UMO。
 - 完全兼容旧版单对话顶层配置（`owner_qq`、`owner_umo`、`livingmemory_*`），升级后原有设置自动保留。
 

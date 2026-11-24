@@ -1,10 +1,112 @@
 """配置解析与校验（纯函数，便于测试）。"""
 from __future__ import annotations
 
+import copy
 import re
 from dataclasses import dataclass, field
 
 _WIN_RE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$")
+
+SECTION_MAP: dict[str, tuple[str, ...]] = {
+    "bilibili_section": ("sessdata", "buvid3", "request_interval_seconds"),
+    "model_vision_section": (
+        "chat_provider_id", "vision_mode", "vision_api_key", "vision_api_base",
+        "vision_model", "vision_provider_id", "max_frames_per_video",
+        "max_images_per_night", "max_tokens_per_night",
+    ),
+    "targets_share_section": ("targets", "owner_qq", "owner_umo", "max_share_per_day", "quiet_hours"),
+    "browse_diary_section": (
+        "interests", "avoid", "candidates_per_round", "deep_watch_per_round",
+        "subtitle_max_chars", "diary_context_count",
+    ),
+    "schedule_section": (
+        "schedule_windows", "wakes_per_window", "skip_probability",
+        "timezone", "offpeak_mode", "peak_holidays",
+    ),
+    "livingmemory_section": (
+        "livingmemory_enabled", "livingmemory_auto_connect", "livingmemory_url",
+        "livingmemory_api_key", "livingmemory_persona_id", "livingmemory_scope",
+    ),
+}
+
+LEGACY_DEFAULTS: dict[str, object] = {
+    "sessdata": "",
+    "buvid3": "",
+    "request_interval_seconds": "2-4",
+    "chat_provider_id": "",
+    "vision_mode": "always",
+    "vision_api_key": "",
+    "vision_api_base": "https://api.deepseek.com/v1",
+    "vision_model": "deepseek-flash",
+    "vision_provider_id": "",
+    "max_frames_per_video": 18,
+    "max_images_per_night": 8,
+    "max_tokens_per_night": 100000,
+    "targets": [],
+    "owner_qq": "",
+    "owner_umo": "",
+    "max_share_per_day": 1,
+    "quiet_hours": "23:00-09:00",
+    "interests": ["科普", "纪录片", "猫", "音乐", "手工"],
+    "avoid": [],
+    "candidates_per_round": 5,
+    "deep_watch_per_round": 2,
+    "subtitle_max_chars": 4000,
+    "diary_context_count": 3,
+    "schedule_windows": ["21:00-23:00"],
+    "wakes_per_window": 1,
+    "skip_probability": 0.1,
+    "timezone": "Europe/London",
+    "offpeak_mode": "auto",
+    "peak_holidays": [],
+    "livingmemory_enabled": False,
+    "livingmemory_auto_connect": True,
+    "livingmemory_url": "http://127.0.0.1:7801",
+    "livingmemory_api_key": "",
+    "livingmemory_persona_id": "",
+    "livingmemory_scope": "",
+}
+
+
+def migrate_legacy_config(raw_config) -> bool:
+    """将旧版平铺顶层配置无损迁移到新版二级菜单分组，并重置隐藏旧键以避免覆盖后续修改。"""
+    if not isinstance(raw_config, dict):
+        return False
+    changed = False
+    for section, keys in SECTION_MAP.items():
+        sec = raw_config.get(section)
+        if not isinstance(sec, dict):
+            continue
+        for k in keys:
+            if k not in raw_config:
+                continue
+            default = LEGACY_DEFAULTS[k]
+            legacy_val = raw_config[k]
+            nested_val = sec.get(k, default)
+            if legacy_val != default and nested_val == default:
+                sec[k] = copy.deepcopy(legacy_val)
+                raw_config[k] = copy.deepcopy(default)
+                changed = True
+    return changed
+
+
+def _flatten_config(c) -> dict:
+    """同时兼容新版二级菜单嵌套结构与旧版平铺结构，返回统一字典供 parse_settings 读取。"""
+    if not isinstance(c, dict):
+        return {}
+    flat = {k: v for k, v in c.items() if k not in SECTION_MAP}
+    for section, keys in SECTION_MAP.items():
+        sec = c.get(section)
+        if not isinstance(sec, dict):
+            continue
+        for k in keys:
+            if k not in sec:
+                continue
+            default = LEGACY_DEFAULTS[k]
+            nested_val = sec[k]
+            if nested_val != default or k not in flat or flat[k] == default:
+                flat[k] = nested_val
+    return flat
 
 
 def parse_window(s: str):
@@ -178,7 +280,7 @@ class Settings:
 
 
 def parse_settings(c) -> Settings:
-    c = c or {}
+    c = _flatten_config(c or {})
     s = Settings()
     s.warnings = []
     s.sessdata = str(c.get("sessdata", "") or "").strip()
